@@ -16,6 +16,7 @@ import database as db
 
 app = FastAPI()
 
+# 모든 곳에서 접속 가능하도록 설정
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -24,6 +25,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# 경로 설정
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
 RESULT_DIR = os.path.join(BASE_DIR, "results")
@@ -31,12 +33,13 @@ RESULT_DIR = os.path.join(BASE_DIR, "results")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(RESULT_DIR, exist_ok=True)
 
+# 결과물 PDF 파일들을 외부에서 접근 가능하게 설정
 app.mount("/results", StaticFiles(directory=RESULT_DIR), name="results")
 
 # --- 작업 함수 (PDF 생성) ---
 def process_photobook(order_id: str, cover_path: str, inside_paths: List[str], title: str, subtitle: str, cover_style: str):
     print(f"🏭 [작업시작] {order_id} - {title}")
-    db.update_status(order_id, "제작중") # DB 상태 업데이트
+    db.update_status(order_id, "제작중") 
 
     work_dir = os.path.join(UPLOAD_DIR, order_id)
     cover_dir = os.path.join(work_dir, "cover")
@@ -67,13 +70,12 @@ def process_photobook(order_id: str, cover_path: str, inside_paths: List[str], t
         photos_info = designer.load_images(inside_dir)
         
         if photos_info:
-            # 선택한 표지 스타일로 생성
             designer.generate_cover(cover_dir, output_dir, selected_style=cover_style)
             designer.create_photobook(photos_info)
             designer.save_book(output_dir)
             
             print(f"✅ [제작완료] {order_id}")
-            db.update_status(order_id, "제작완료") # DB 상태 업데이트
+            db.update_status(order_id, "제작완료") 
         else:
             print("⚠️ 사진 없음")
             db.update_status(order_id, "오류(사진없음)")
@@ -82,6 +84,24 @@ def process_photobook(order_id: str, cover_path: str, inside_paths: List[str], t
         db.update_status(order_id, "제작오류")
 
 # --- API 엔드포인트 ---
+
+@app.get("/", response_class=HTMLResponse)
+async def home_page():
+    """고객용 메인 페이지 서빙"""
+    index_path = os.path.join(BASE_DIR, "index.html")
+    if os.path.exists(index_path):
+        with open(index_path, "r", encoding="utf-8") as f:
+            return f.read()
+    return "index.html 파일이 없습니다. 대장님, 파일을 서버 폴더에 넣어주세요!"
+
+@app.get("/admin", response_class=HTMLResponse)
+async def admin_page():
+    """관리자 대시보드 페이지 서빙"""
+    admin_path = os.path.join(BASE_DIR, "admin.html")
+    if os.path.exists(admin_path):
+        with open(admin_path, "r", encoding="utf-8") as f:
+            return f.read()
+    return "admin.html 파일이 없습니다."
 
 @app.post("/api/admin/login")
 async def admin_login(password: str = Form(...)):
@@ -97,7 +117,6 @@ async def change_password(current_password: str = Form(...), new_password: str =
     
     db.change_password(new_password)
     return {"success": True, "message": "비밀번호가 변경되었습니다."}
-
 
 @app.post("/api/order")
 async def create_order(
@@ -135,7 +154,6 @@ async def create_order(
     unit_price = 7800 + (max(0, est_pages - 20) * 200)
     total_price = (unit_price * quantity) + 3500
     
-    # DB에 저장할 데이터 구조 구성
     order_entry = {
         "id": order_id,
         "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
@@ -155,7 +173,6 @@ async def create_order(
         }
     }
     
-    # ★ JSON 파일 대신 DB 함수 호출!
     db.add_order(order_entry)
 
     subtitle = datetime.now().strftime("%Y . %m . %d")
@@ -165,23 +182,15 @@ async def create_order(
 
 @app.get("/api/admin/orders")
 def get_orders_api():
-    # ★ JSON 파일 대신 DB 함수 호출!
     return db.get_orders()
 
 @app.post("/api/admin/status")
 async def update_status_api(order_id: str = Form(...), status: str = Form(...)):
-    # ★ JSON 파일 대신 DB 함수 호출!
     db.update_status(order_id, status)
     return {"msg": "updated"}
 
-@app.get("/admin", response_class=HTMLResponse)
-async def admin_page():
-    if os.path.exists("admin.html"):
-        with open("admin.html", "r", encoding="utf-8") as f:
-            return f.read()
-    return "admin.html 파일이 없습니다."
-
 if __name__ == "__main__":
     import uvicorn
-    print("🚀 포토북 본부 가동! (http://127.0.0.1:8000)")
+    # host를 0.0.0.0으로 해야 외부(핸드폰 등)에서 접속이 가능해!
+    print("🚀 포토북 본부 가동! (http://0.0.0.0:8000)")
     uvicorn.run(app, host="0.0.0.0", port=8000)
