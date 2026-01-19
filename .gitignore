@@ -1,0 +1,26 @@
+# 파이썬 자동 생성 파일 (지워도 됨)
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 가상환경 폴더 (서버에서 다시 만들 거라 필요 없음)
+venv/
+env/
+
+# 보안 파일 (비밀번호나 DB는 해킹 위험! 절대 올리지 마!)
+*.db
+*.sqlite3
+admin_secrets.json
+.env
+
+# 업로드된 사진이나 결과물 (용량 큼)
+uploads/
+results/
+
+# 리액트 관련 무거운 파일들 (서버에서 다시 설치함)
+node_modules/
+client/node_modules/
+client/dist/
+
+# 맥(Mac) 사용 시 생기는 잡동사니
+.DS_Store

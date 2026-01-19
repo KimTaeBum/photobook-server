@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>포스트링 포토북 관리자</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700&display=swap');
+        body { font-family: 'Noto Sans KR', sans-serif; }
+        @media print {
+            body * { visibility: hidden; }
+            #print-area, #print-area * { visibility: visible; }
+            #print-area { position: absolute; left: 0; top: 0; width: 100%; }
+            .print-page { page-break-after: always; padding: 20px; border: 1px solid #ddd; margin-bottom: 20px; }
+            .no-print { display: none !important; }
+        }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800">
+
+    <!-- 1. 로그인 모달 (비밀번호 노출 삭제됨, 안내 문구 삭제됨) -->
+    <div id="loginModal" class="fixed inset-0 bg-gray-900 z-50 flex items-center justify-center">
+        <div class="bg-white p-8 rounded-2xl shadow-2xl w-full max-w-sm text-center">
+            <div class="bg-yellow-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-6">
+                <i data-lucide="lock" class="w-8 h-8 text-yellow-600"></i>
+            </div>
+            <h2 class="text-2xl font-bold text-gray-800 mb-2">관리자 로그인</h2>
+            <p class="text-gray-500 mb-6 text-sm">접근 권한이 필요합니다.</p>
+            <form onsubmit="handleLogin(event)">
+                <input type="password" id="adminPassword" placeholder="비밀번호 입력" class="w-full border border-gray-300 rounded-lg px-4 py-3 mb-4 focus:ring-2 focus:ring-yellow-400 outline-none" required>
+                <button type="submit" class="w-full bg-yellow-400 hover:bg-yellow-500 text-black font-bold py-3 rounded-lg transition shadow-sm">
+                    로그인
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- 2. 비밀번호 변경 모달 (UI 개선됨) -->
+    <div id="changePwModal" class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center hidden">
+        <div class="bg-white p-8 rounded-2xl shadow-2xl w-full max-w-sm relative">
+            <button onclick="closeChangePwModal()" class="absolute top-4 right-4 text-gray-400 hover:text-gray-600">
+                <i data-lucide="x"></i>
+            </button>
+            <h3 class="text-xl font-bold mb-6 flex items-center gap-2">
+                <i data-lucide="key" class="w-5 h-5 text-yellow-500"></i> 비밀번호 변경
+            </h3>
+            
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 mb-1">현재 비밀번호</label>
+                    <input type="password" id="currentPw" class="w-full border border-gray-300 p-2.5 rounded-lg outline-none focus:ring-2 focus:ring-yellow-400 bg-gray-50" placeholder="현재 사용 중인 비밀번호">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 mb-1">새로운 비밀번호</label>
+                    <input type="password" id="newPw" class="w-full border border-gray-300 p-2.5 rounded-lg outline-none focus:ring-2 focus:ring-yellow-400" placeholder="변경할 비밀번호">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 mb-1">새로운 비밀번호 확인</label>
+                    <input type="password" id="confirmPw" class="w-full border border-gray-300 p-2.5 rounded-lg outline-none focus:ring-2 focus:ring-yellow-400" placeholder="한 번 더 입력해주세요">
+                    <p id="pwMatchMsg" class="text-xs mt-1 h-4"></p>
+                </div>
+            </div>
+
+            <button onclick="handleChangePassword()" class="w-full bg-gray-800 hover:bg-gray-900 text-white font-bold py-3 rounded-lg transition mt-6 shadow-md">
+                변경 완료
+            </button>
+        </div>
+    </div>
+
+    <!-- 3. 메인 대시보드 -->
+    <div id="dashboard" class="min-h-screen flex flex-col hidden">
+        <!-- 상단 헤더 -->
+        <header class="bg-white shadow-sm sticky top-0 z-10 no-print">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
+                <div class="flex items-center gap-3">
+                    <div class="bg-yellow-400 p-2 rounded-lg shadow-md">
+                        <i data-lucide="shield-check" class="text-white w-6 h-6"></i>
+                    </div>
+                    <div>
+                        <h1 class="text-xl font-bold text-gray-900 leading-none">포스트링 통합 관제실</h1>
+                        <p class="text-xs text-gray-500 mt-1">Authorized Access Only</p>
+                    </div>
+                </div>
+                <div class="flex gap-2">
+                    <button onclick="downloadExcel()" class="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-3 py-2 rounded-lg transition shadow-sm font-bold text-sm">
+                        <i data-lucide="file-spreadsheet" class="w-4 h-4"></i> 엑셀 송장
+                    </button>
+                    <button onclick="printSelectedOrders()" class="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg transition shadow-sm font-bold text-sm">
+                        <i data-lucide="printer" class="w-4 h-4"></i> 주문서
+                    </button>
+                    
+                    <div class="h-8 w-px bg-gray-300 mx-2"></div>
+
+                    <button onclick="loadOrders()" class="bg-white border border-gray-300 hover:bg-gray-50 px-3 py-2 rounded-lg transition text-gray-600 shadow-sm" title="새로고침">
+                        <i data-lucide="refresh-cw" class="w-5 h-5"></i>
+                    </button>
+                    <button onclick="openChangePwModal()" class="bg-gray-100 hover:bg-gray-200 text-gray-600 px-3 py-2 rounded-lg transition shadow-sm text-sm font-medium flex items-center gap-1">
+                        <i data-lucide="key" class="w-4 h-4"></i> 비번변경
+                    </button>
+                    <button onclick="logout()" class="bg-gray-800 hover:bg-gray-900 text-white px-3 py-2 rounded-lg transition shadow-sm text-sm font-medium">
+                        로그아웃
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 no-print space-y-8">
+            
+            <!-- 1. 핵심 지표 (KPI) -->
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
+                <!-- 총 주문 -->
+                <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex flex-col justify-between hover:shadow-md transition">
+                    <div class="flex justify-between items-start">
+                        <div>
+                            <p class="text-xs font-bold text-gray-400 uppercase tracking-wider">Total Orders</p>
+                            <h3 class="text-3xl font-black mt-2 text-gray-800" id="totalOrders">0건</h3>
+                        </div>
+                        <div class="p-3 bg-blue-50 rounded-xl text-blue-600"><i data-lucide="shopping-bag" class="w-6 h-6"></i></div>
+                    </div>
+                </div>
+                <!-- 총 매출 -->
+                <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex flex-col justify-between hover:shadow-md transition">
+                    <div class="flex justify-between items-start">
+                        <div>
+                            <p class="text-xs font-bold text-gray-400 uppercase tracking-wider">Total Revenue</p>
+                            <h3 class="text-3xl font-black mt-2 text-red-500" id="totalRevenue">0원</h3>
+                        </div>
+                        <div class="p-3 bg-red-50 rounded-xl text-red-600"><i data-lucide="coins" class="w-6 h-6"></i></div>
+                    </div>
+                </div>
+                <!-- 제작 대기 -->
+                <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex flex-col justify-between hover:shadow-md transition">
+                    <div class="flex justify-between items-start">
+                        <div>
+                            <p class="text-xs font-bold text-gray-400 uppercase tracking-wider">Processing</p>
+                            <h3 class="text-3xl font-black mt-2 text-yellow-500" id="pendingOrders">0건</h3>
+                        </div>
+                        <div class="p-3 bg-yellow-50 rounded-xl text-yellow-600"><i data-lucide="loader" class="w-6 h-6"></i></div>
+                    </div>
+                </div>
+                <!-- 배송 중 -->
+                <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex flex-col justify-between hover:shadow-md transition">
+                    <div class="flex justify-between items-start">
+                        <div>
+                            <p class="text-xs font-bold text-gray-400 uppercase tracking-wider">Shipping</p>
+                            <h3 class="text-3xl font-black mt-2 text-green-500" id="shippingOrders">0건</h3>
+                        </div>
+                        <div class="p-3 bg-green-50 rounded-xl text-green-600"><i data-lucide="truck" class="w-6 h-6"></i></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 2. 날짜 검색 -->
+            <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-100 flex flex-wrap items-center gap-4 text-sm">
+                <div class="flex items-center gap-2">
+                    <div class="bg-gray-100 p-2 rounded-lg"><i data-lucide="calendar" class="w-4 h-4 text-gray-600"></i></div>
+                    <span class="font-bold text-gray-700 text-lg">기간 조회</span>
+                </div>
+                <div class="h-6 w-px bg-gray-300 mx-2"></div>
+                <input type="date" id="startDate" class="border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-yellow-400 outline-none shadow-sm text-gray-600">
+                <span class="text-gray-400 font-bold">~</span>
+                <input type="date" id="endDate" class="border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-yellow-400 outline-none shadow-sm text-gray-600">
+                <button onclick="searchOrders()" class="bg-gray-800 hover:bg-gray-900 text-white px-5 py-2 rounded-lg font-bold transition shadow-md">
+                    조회하기
+                </button>
+                <button onclick="resetSearch()" class="text-gray-500 hover:text-gray-700 underline px-2">
+                    전체보기
+                </button>
+            </div>
+
+            <!-- 3. 주문 리스트 -->
+            <div class="bg-white rounded-2xl shadow-sm overflow-hidden border border-gray-200">
+                <div class="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+                    <h2 class="text-base font-bold text-gray-800 flex items-center gap-2">
+                        <i data-lucide="list" class="w-4 h-4 text-gray-400"></i> 주문 상세 내역
+                    </h2>
+                </div>
+                
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                            <tr class="bg-gray-50 text-gray-500 text-xs uppercase tracking-wide border-b border-gray-100">
+                                <th class="px-6 py-3 w-10 text-center"><input type="checkbox" id="selectAll" onclick="toggleAll(this)" class="rounded w-4 h-4 cursor-pointer text-yellow-500 focus:ring-yellow-500"></th>
+                                <th class="px-6 py-3 font-bold">접수일 / 주문번호</th>
+                                <th class="px-6 py-3 font-bold">고객 정보</th>
+                                <th class="px-6 py-3 font-bold">상품 정보 (수량)</th>
+                                <th class="px-6 py-3 font-bold text-right">결제 금액</th>
+                                <th class="px-6 py-3 font-bold text-center">진행 상태</th>
+                                <th class="px-6 py-3 font-bold text-right">관리</th>
+                            </tr>
+                        </thead>
+                        <tbody id="order-list" class="divide-y divide-gray-100 text-sm">
+                            <tr><td colspan="7" class="p-10 text-center text-gray-400">데이터를 불러오는 중...</td></tr>
+                        </tbody>
+                        <!-- 합계 푸터 -->
+                        <tfoot class="bg-yellow-50 border-t-2 border-yellow-100">
+                            <tr>
+                                <td colspan="4" class="px-6 py-4 text-right font-bold text-gray-700 text-sm">
+                                    <span class="text-gray-500 font-normal mr-2">선택 기간 합계:</span>
+                                    총 <span id="footer-count" class="text-black text-lg">0</span> 건
+                                </td>
+                                <td class="px-6 py-4 text-right font-black text-red-600 text-xl" id="footer-total">0원</td>
+                                <td colspan="2"></td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+            </div>
+
+        </main>
+    </div>
+
+    <!-- 인쇄용 영역 -->
+    <div id="print-area" class="hidden"></div>
+
+    <script>
+        lucide.createIcons();
+        const API_BASE = "http://127.0.0.1:8000";
+        let allOrders = [];
+        let currentOrders = [];
+        let adminToken = localStorage.getItem('adminToken'); // 저장된 비번 확인
+
+        // 로그인 체크
+        if (adminToken) {
+            document.getElementById('loginModal').classList.add('hidden');
+            document.getElementById('dashboard').classList.remove('hidden');
+            loadOrders();
+            setInterval(loadOrders, 10000); // 10초 갱신
+        }
+
+        async function handleLogin(e) {
+            e.preventDefault();
+            // [수정] 공백 제거 추가
+            const password = document.getElementById('adminPassword').value.trim();
+            try {
+                const formData = new FormData();
+                formData.append('password', password);
+                const res = await fetch(`${API_BASE}/api/admin/login`, { method: 'POST', body: formData });
+                const data = await res.json();
+                if (data.success) {
+                    localStorage.setItem('adminToken', password);
+                    adminToken = password;
+                    document.getElementById('loginModal').classList.add('hidden');
+                    document.getElementById('dashboard').classList.remove('hidden');
+                    loadOrders();
+                    // 비밀번호 변경 권장 메시지가 있으면 표시
+                    if (data.message !== "로그인 성공!") alert(data.message);
+                } else {
+                    // [수정] 실패 시 안내 메시지 강화
+                    alert("비밀번호가 틀렸습니다!\n\n만약 초기 비밀번호(153153)가 안 된다면,\n서버 폴더(포토북프로젝트) 안에 있는 'admin_secrets.json' 파일을 삭제하고\n서버(main.py)를 껐다 다시 켜주세요.");
+                }
+            } catch (err) { alert("서버 연결 실패! main.py가 실행 중인지 확인해주세요."); }
+        }
+
+        // 비밀번호 변경 모달 열기/닫기
+        function openChangePwModal() {
+            document.getElementById('currentPw').value = '';
+            document.getElementById('newPw').value = '';
+            document.getElementById('confirmPw').value = '';
+            document.getElementById('pwMatchMsg').innerText = '';
+            document.getElementById('changePwModal').classList.remove('hidden');
+        }
+        function closeChangePwModal() {
+            document.getElementById('changePwModal').classList.add('hidden');
+        }
+
+        // 비밀번호 확인 실시간 체크
+        document.getElementById('confirmPw').addEventListener('input', function() {
+            const newPw = document.getElementById('newPw').value;
+            const confirmPw = this.value;
+            const msg = document.getElementById('pwMatchMsg');
+            
+            if (newPw && confirmPw) {
+                if (newPw === confirmPw) {
+                    msg.innerText = "비밀번호가 일치합니다.";
+                    msg.className = "text-xs mt-1 h-4 text-green-600 font-bold";
+                } else {
+                    msg.innerText = "비밀번호가 일치하지 않습니다.";
+                    msg.className = "text-xs mt-1 h-4 text-red-500 font-bold";
+                }
+            } else {
+                msg.innerText = "";
+            }
+        });
+
+        async function handleChangePassword() {
+            const currentPw = document.getElementById('currentPw').value;
+            const newPw = document.getElementById('newPw').value;
+            const confirmPw = document.getElementById('confirmPw').value;
+            
+            if(!currentPw || !newPw) return alert("모든 항목을 입력해주세요.");
+            if(newPw !== confirmPw) return alert("새 비밀번호가 일치하지 않습니다.");
+
+            const formData = new FormData();
+            formData.append('current_password', currentPw);
+            formData.append('new_password', newPw);
+
+            try {
+                const res = await fetch(`${API_BASE}/api/admin/change_password`, { method: 'POST', body: formData });
+                const data = await res.json();
+
+                if (data.success) {
+                    alert("비밀번호 변경 완료! 다시 로그인해주세요.");
+                    logout();
+                } else {
+                    alert(data.message || "비밀번호 변경 실패");
+                }
+            } catch (e) { alert("오류 발생"); }
+        }
+
+        function logout() {
+            if(confirm("로그아웃 하시겠습니까?")) {
+                localStorage.removeItem('adminToken');
+                location.reload();
+            }
+        }
+
+        const statusColors = {
+            "접수됨": "bg-gray-100 text-gray-600 border border-gray-200",
+            "제작중": "bg-yellow-50 text-yellow-700 border border-yellow-200 animate-pulse",
+            "제작완료": "bg-blue-50 text-blue-700 border border-blue-200",
+            "배송중": "bg-purple-50 text-purple-700 border border-purple-200",
+            "배송완료": "bg-green-50 text-green-700 border border-green-200",
+            "오류발생": "bg-red-50 text-red-700 border border-red-200"
+        };
+
+        async function loadOrders() {
+            if (!adminToken) return;
+            try {
+                const res = await fetch(`${API_BASE}/api/admin/orders`);
+                const orders = await res.json();
+                allOrders = orders;
+                
+                const start = document.getElementById('startDate').value;
+                const end = document.getElementById('endDate').value;
+                
+                if (start || end) {
+                    searchOrders(); 
+                } else {
+                    currentOrders = orders;
+                    renderTable(orders);
+                    updateGlobalStats(orders);
+                }
+            } catch (e) { console.error(e); }
+        }
+
+        async function changeStatus(id, status) {
+            if(!confirm(`주문상태를 [${status}]로 변경할까요?`)) return;
+            const form = new FormData();
+            form.append('order_id', id);
+            form.append('status', status);
+            await fetch(`${API_BASE}/api/admin/status`, { method: 'POST', body: form });
+            loadOrders();
+        }
+
+        function updateGlobalStats(orders) {
+            document.getElementById('totalOrders').innerText = orders.length;
+            const total = orders.reduce((sum, o) => sum + (o.info?.price || 0), 0);
+            document.getElementById('totalRevenue').innerText = total.toLocaleString();
+            document.getElementById('pendingOrders').innerText = orders.filter(o => ['접수됨', '제작중'].includes(o.status)).length;
+            document.getElementById('shippingOrders').innerText = orders.filter(o => o.status === '배송중').length;
+        }
+
+        function searchOrders() {
+            const startVal = document.getElementById('startDate').value;
+            const endVal = document.getElementById('endDate').value;
+            
+            if (!startVal && !endVal) {
+                currentOrders = allOrders;
+            } else {
+                const startDate = startVal ? new Date(startVal) : new Date('2000-01-01');
+                const endDate = endVal ? new Date(endVal) : new Date();
+                endDate.setHours(23, 59, 59, 999);
+
+                currentOrders = allOrders.filter(o => {
+                    const orderDate = new Date(o.date.split(' ')[0]);
+                    return orderDate >= startDate && orderDate <= endDate;
+                });
+            }
+            renderTable(currentOrders);
+        }
+
+        function resetSearch() {
+            document.getElementById('startDate').value = '';
+            document.getElementById('endDate').value = '';
+            searchOrders();
+        }
+
+        function renderTable(orders) {
+            const tbody = document.getElementById('order-list');
+            const footerCount = document.getElementById('footer-count');
+            const footerTotal = document.getElementById('footer-total');
+
+            const totalCount = orders.length;
+            const totalPrice = orders.reduce((sum, o) => sum + (o.info?.price || 0), 0);
+            
+            footerCount.innerText = `(${totalCount}건)`;
+            footerTotal.innerText = totalPrice.toLocaleString() + "원";
+
+            if (orders.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" class="p-10 text-center text-gray-400">데이터가 없습니다.</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = orders.map(o => {
+                const badgeColor = statusColors[o.status] || "bg-gray-100 text-gray-600 border-gray-200";
+                const quantity = o.info?.quantity || 1;
+                const coverUrl = o.files?.cover ? `${API_BASE}${o.files.cover}` : '#';
+                const innerUrl = o.files?.inner ? `${API_BASE}${o.files.inner}` : '#';
+
+                return `
+                <tr class="hover:bg-gray-50 transition border-b border-gray-50 last:border-b-0">
+                    <td class="px-6 py-4 text-center"><input type="checkbox" name="orderCheck" value="${o.id}" class="rounded w-5 h-5 cursor-pointer text-yellow-500 focus:ring-yellow-500"></td>
+                    <td class="px-6 py-4"><div class="font-bold text-gray-800 text-sm">${o.date.split(' ')[0]}</div><div class="text-xs text-gray-400 mt-1 font-mono">${o.id}</div></td>
+                    <td class="px-6 py-4"><div class="font-bold text-sm">${o.user.name}</div><div class="text-xs text-gray-500 mt-0.5">${o.user.phone}</div><div class="text-xs text-gray-400 mt-1 truncate max-w-[150px]" title="${o.user.addr}">${o.user.addr}</div></td>
+                    <td class="px-6 py-4"><div class="font-medium text-indigo-900 truncate max-w-[180px] text-sm" title="${o.info.title}">"${o.info.title}"</div><div class="text-xs text-gray-500 mt-1.5 flex items-center gap-2"><span class="bg-gray-100 px-2 py-0.5 rounded border border-gray-200">사진 ${o.info.photos}장</span><span class="bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded border border-indigo-100 font-bold">${quantity}권</span></div></td>
+                    <td class="px-6 py-4 text-right font-black text-gray-800 text-base">${(o.info.price || 0).toLocaleString()}원</td>
+                    <td class="px-6 py-4 text-center"><span class="px-2 py-1 rounded-full text-xs font-bold ${badgeColor} shadow-sm inline-block min-w-[60px]">${o.status}</span></td>
+                    <td class="px-6 py-4 text-right">
+                        ${o.status === '제작완료' || o.status === '배송중' || o.status === '배송완료' ? `
+                            <div class="flex flex-col gap-2 items-end">
+                                <div class="flex gap-1">
+                                    <a href="${innerUrl}" download target="_blank" class="px-2 py-1 bg-white border border-gray-300 text-gray-700 rounded text-xs font-bold hover:bg-gray-50 flex items-center gap-1 shadow-sm transition"><i data-lucide="file-text" class="w-3 h-3 text-blue-500"></i> 내지</a>
+                                    <a href="${coverUrl}" download target="_blank" class="px-2 py-1 bg-white border border-gray-300 text-gray-700 rounded text-xs font-bold hover:bg-gray-50 flex items-center gap-1 shadow-sm transition"><i data-lucide="image" class="w-3 h-3 text-indigo-500"></i> 표지</a>
+                                </div>
+                                <div class="flex gap-1 mt-1">
+                                    <button onclick="changeStatus('${o.id}', '배송중')" class="px-2 py-1 bg-purple-50 text-purple-700 border border-purple-200 rounded text-xs hover:bg-purple-100 font-medium">🚚 발송</button>
+                                    <button onclick="changeStatus('${o.id}', '배송완료')" class="px-2 py-1 bg-green-50 text-green-700 border border-green-200 rounded text-xs hover:bg-green-100 font-medium">✅ 완료</button>
+                                </div>
+                            </div>
+                        ` : `<div class="text-center py-2"><span class="text-xs text-gray-400 flex items-center justify-end gap-1 animate-pulse"><i data-lucide="loader" class="w-3 h-3 animate-spin"></i> 제작 중...</span></div>`}
+                    </td>
+                </tr>
+                `
+            }).join('');
+            lucide.createIcons();
+        }
+
+        function toggleAll(source) {
+            const checkboxes = document.getElementsByName('orderCheck');
+            for(let i=0; i<checkboxes.length; i++) checkboxes[i].checked = source.checked;
+        }
+
+        function getSelectedOrders() {
+            const checkboxes = document.querySelectorAll('input[name="orderCheck"]:checked');
+            const selectedIds = Array.from(checkboxes).map(cb => cb.value);
+            return currentOrders.filter(o => selectedIds.includes(o.id));
+        }
+
+        function downloadExcel() {
+            const selectedOrders = getSelectedOrders();
+            if (selectedOrders.length === 0) return alert("선택된 주문이 없습니다.");
+            
+            const data = selectedOrders.map(o => ({
+                "주문번호": o.id, "수령인": o.user.name, "전화번호": o.user.phone, "주소": o.user.addr,
+                "상품명": `[포토북] ${o.info.title}`, "수량": o.info.quantity || 1, "배송메모": "부재시 문앞", "주문일자": o.date
+            }));
+
+            const ws = XLSX.utils.json_to_sheet(data);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "주문발송목록");
+            const today = new Date().toISOString().slice(0,10).replace(/-/g,"");
+            XLSX.writeFile(wb, `포토북_배송목록_${today}.xlsx`);
+        }
+
+        function printSelectedOrders() {
+            const selectedOrders = getSelectedOrders();
+            if (selectedOrders.length === 0) return alert("인쇄할 주문을 선택해주세요.");
+
+            const printArea = document.getElementById('print-area');
+            printArea.innerHTML = "";
+            
+            selectedOrders.forEach(o => {
+                const quantity = o.info.quantity || 1;
+                const pageHtml = `
+                    <div class="print-page bg-white p-10 max-w-[210mm] mx-auto mb-4 border border-gray-300 font-sans">
+                        <div class="flex justify-between items-end border-b-2 border-gray-800 pb-4 mb-8">
+                            <h1 class="text-4xl font-black text-gray-900">주 문 확 인 서</h1>
+                            <div class="text-right"><div class="text-sm text-gray-500">주문번호</div><div class="text-lg font-bold font-mono">${o.id}</div></div>
+                        </div>
+                        <div class="mb-10"><h2 class="text-xl font-bold text-gray-800 mb-3 flex items-center gap-2"><span class="w-2 h-8 bg-blue-600 rounded"></span> 배송지 정보</h2><table class="w-full text-sm"><tr><th class="text-left py-3 px-4 bg-gray-100 font-bold w-32 border-b">수령인</th><td class="py-3 px-4 border-b font-bold text-lg">${o.user.name}</td></tr><tr><th class="text-left py-3 px-4 bg-gray-100 font-bold border-b">연락처</th><td class="py-3 px-4 border-b">${o.user.phone}</td></tr><tr><th class="text-left py-3 px-4 bg-gray-100 font-bold border-b">주소</th><td class="py-3 px-4 border-b">${o.user.addr}</td></tr></table></div>
+                        <div class="mb-10"><h2 class="text-xl font-bold text-gray-800 mb-3 flex items-center gap-2"><span class="w-2 h-8 bg-yellow-400 rounded"></span> 주문 상품</h2><table class="w-full text-sm text-center border-t-2 border-gray-800"><thead class="bg-gray-50"><tr><th class="py-3 px-4 border-b font-bold text-left">상품명 / 옵션</th><th class="py-3 px-4 border-b font-bold">수량</th></tr></thead><tbody><tr><td class="py-4 px-4 border-b text-left"><div class="font-bold text-lg text-gray-900">원없이 담는 포토북</div><div class="text-gray-500 mt-1">제목: ${o.info.title}</div></td><td class="py-4 px-4 border-b font-bold text-2xl">${quantity}</td></tr></tbody></table></div>
+                    </div><div style="page-break-after: always;"></div>
+                `;
+                printArea.insertAdjacentHTML('beforeend', pageHtml);
+            });
+            window.print();
+        }
+
+        loadOrders();
+        setInterval(loadOrders, 5000);
+    </script>
+</body>
+</html>
