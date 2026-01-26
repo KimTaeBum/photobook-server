@@ -36,6 +36,11 @@ os.makedirs(RESULT_DIR, exist_ok=True)
 # 결과물 PDF 파일들을 외부에서 접근 가능하게 설정
 app.mount("/results", StaticFiles(directory=RESULT_DIR), name="results")
 
+# --- [중요] 리액트 빌드 파일 서빙 설정 ---
+# 만약 client/dist 폴더가 있다면 그 안의 파일들을 보여줍니다.
+if os.path.exists(os.path.join(BASE_DIR, "client/dist")):
+    app.mount("/", StaticFiles(directory=os.path.join(BASE_DIR, "client/dist"), html=True), name="static")
+
 # --- 작업 함수 (PDF 생성) ---
 def process_photobook(order_id: str, cover_path: str, inside_paths: List[str], title: str, subtitle: str, cover_style: str):
     print(f"🏭 [작업시작] {order_id} - {title}")
@@ -84,15 +89,6 @@ def process_photobook(order_id: str, cover_path: str, inside_paths: List[str], t
         db.update_status(order_id, "제작오류")
 
 # --- API 엔드포인트 ---
-
-@app.get("/", response_class=HTMLResponse)
-async def home_page():
-    """고객용 메인 페이지 서빙"""
-    index_path = os.path.join(BASE_DIR, "index.html")
-    if os.path.exists(index_path):
-        with open(index_path, "r", encoding="utf-8") as f:
-            return f.read()
-    return "index.html 파일이 없습니다. 대장님, 파일을 서버 폴더에 넣어주세요!"
 
 @app.get("/admin", response_class=HTMLResponse)
 async def admin_page():
@@ -189,8 +185,21 @@ async def update_status_api(order_id: str = Form(...), status: str = Form(...)):
     db.update_status(order_id, status)
     return {"msg": "updated"}
 
+# [추가] 만약 빌드된 파일이 없을 때 보여줄 임시 홈
+@app.get("/", response_class=HTMLResponse)
+async def fallback_home():
+    return """
+    <html>
+        <body style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; font-family:sans-serif;">
+            <h1>🚀 서버는 잘 돌아가고 있어요!</h1>
+            <p>하지만 아직 화면(React)이 빌드되지 않았네요.</p>
+            <p>터미널에서 <b>cd client && npm run build</b>를 실행해 주세요!</p>
+            <a href="/admin" style="padding:10px 20px; background:#facc15; border-radius:8px; text-decoration:none; color:black; font-weight:bold;">관리자 페이지 가기</a>
+        </body>
+    </html>
+    """
+
 if __name__ == "__main__":
     import uvicorn
-    # host를 0.0.0.0으로 해야 외부(핸드폰 등)에서 접속이 가능해!
     print("🚀 포토북 본부 가동! (http://0.0.0.0:8000)")
     uvicorn.run(app, host="0.0.0.0", port=8000)

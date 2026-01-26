@@ -44,10 +44,10 @@ const SUGGESTED_TITLES = [
   "나의 즐거운 취미생활", "주말엔 훌쩍 떠나요", "사랑스러운 나의 반려동물"
 ];
 
+// 표지 스타일 정의 (2종)
 const COVER_STYLES = [
-  { id: 'BAND', name: '밴드', desc: '심플한 띠지 스타일' },
-  { id: 'COLLAGE', name: '4컷', desc: '여러 장을 한눈에' },
-  { id: 'FULL', name: '매거진', desc: '사진을 꽉 차게' }
+  { id: 'BAND', name: '밴드 스타일', desc: '사진과 글이 조화롭게' },
+  { id: 'FULL', name: '매거진 스타일', desc: '사진을 꽉 차게' }
 ];
 
 // ------------------------------------------------------------------
@@ -67,11 +67,12 @@ function App() {
   const [selectedCoverStyle, setSelectedCoverStyle] = useState('BAND');
 
   useEffect(() => {
-    // 폰트 및 애니메이션 스타일
+    // 폰트 및 애니메이션 스타일 (주아체 + 나눔명조 추가)
     const style = document.createElement('style');
     style.innerHTML = `
-      @import url('https://fonts.googleapis.com/css2?family=Jua&display=swap');
+      @import url('https://fonts.googleapis.com/css2?family=Jua&family=Nanum+Myeongjo:wght@700&display=swap');
       .font-jua { font-family: 'Jua', sans-serif; }
+      .font-myeongjo { font-family: 'Nanum Myeongjo', serif; }
       @keyframes gentle-float {
         0%, 100% { transform: translateY(0); }
         50% { transform: translateY(-10px); }
@@ -82,7 +83,6 @@ function App() {
     `;
     document.head.appendChild(style);
 
-    // Tailwind CSS
     const checkTailwind = () => {
       if (document.querySelector('script[src="https://cdn.tailwindcss.com"]')) {
         setTimeout(() => setIsReady(true), 100);
@@ -95,12 +95,10 @@ function App() {
     };
     checkTailwind();
 
-    // 다음(Daum) 우편번호 서비스 로드
     const daumScript = document.createElement('script');
     daumScript.src = "//t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js";
     document.body.appendChild(daumScript);
 
-    // 카카오 SDK 로드
     if (!window.Kakao) {
       const script = document.createElement('script');
       script.src = 'https://developers.kakao.com/sdk/js/kakao.js';
@@ -108,7 +106,6 @@ function App() {
       script.onload = () => {
           if (window.Kakao && !window.Kakao.isInitialized()) {
               window.Kakao.init('f799a77a204071dcc925c8c3d35db2e6');
-              console.log("Kakao Initialized");
           }
       };
       document.body.appendChild(script);
@@ -168,37 +165,24 @@ function App() {
     if (newQuantity >= 1) setQuantity(newQuantity);
   };
 
-  // 전화번호 자동 포맷팅 및 숫자 확인
   const handlePhoneChange = (e) => {
     const value = e.target.value.replace(/[^0-9]/g, '');
     if (e.target.value !== value) {
-       // 숫자가 아닌 문자가 들어오면 무시 (또는 경고)
        alert("숫자만 입력해주세요!");
        return; 
     }
-
     let formatted = value;
-    if (value.length < 4) {
-      formatted = value;
-    } else if (value.length < 7) {
-      formatted = value.substr(0, 3) + '-' + value.substr(3);
-    } else if (value.length < 11) {
-      formatted = value.substr(0, 3) + '-' + value.substr(3, 3) + '-' + value.substr(6);
-    } else {
-      formatted = value.substr(0, 3) + '-' + value.substr(3, 4) + '-' + value.substr(7);
-    }
+    if (value.length < 4) { formatted = value; } 
+    else if (value.length < 7) { formatted = value.substr(0, 3) + '-' + value.substr(3); } 
+    else if (value.length < 11) { formatted = value.substr(0, 3) + '-' + value.substr(3, 3) + '-' + value.substr(6); } 
+    else { formatted = value.substr(0, 3) + '-' + value.substr(3, 4) + '-' + value.substr(7); }
     setAddress({...address, phone: formatted});
   };
 
-  // 다음 우편번호 찾기
   const handlePostcode = () => {
     new daum.Postcode({
         oncomplete: function(data) {
-            setAddress(prev => ({
-                ...prev,
-                zip: data.zonecode,
-                addr: data.address
-            }));
+            setAddress(prev => ({ ...prev, zip: data.zonecode, addr: data.address }));
         }
     }).open();
   };
@@ -231,10 +215,7 @@ function App() {
 
   const handleOrderSubmit = async () => {
     setIsProcessing(true);
-    
-    // 서버 주소 자동 감지
     const serverIp = window.location.hostname;
-    // 로컬 테스트일 경우 localhost, 아니면 감지된 IP 사용
     const API_URL = `http://${serverIp}:8000/api/order`;
 
     const formData = new FormData();
@@ -243,77 +224,57 @@ function App() {
     formData.append('title', displayTitle);
     formData.append('username', address.name);
     formData.append('phone', address.phone);
-    // 상세 주소 합치기
     const fullAddress = `(${address.zip}) ${address.addr} ${document.getElementById('detailAddr')?.value || ''}`;
     formData.append('address', fullAddress);
     formData.append('quantity', quantity);
     formData.append('cover_style', selectedCoverStyle);
 
     try {
-        const response = await fetch(API_URL, {
-            method: 'POST',
-            body: formData,
-        });
-        if (response.ok) {
-            setStep('DONE');
-        } else {
-            alert("주문 전송 실패! 서버(main.py)가 켜져 있는지 확인해주세요.");
-        }
-    } catch (error) {
-        alert(`서버(${API_URL}) 연결 오류!`);
-    } finally {
-        setIsProcessing(false);
-    }
+        const response = await fetch(API_URL, { method: 'POST', body: formData });
+        if (response.ok) { setStep('DONE'); } 
+        else { alert("주문 전송 실패! 서버(main.py)가 켜져 있는지 확인해주세요."); }
+    } catch (error) { alert(`서버(${API_URL}) 연결 오류!`); } 
+    finally { setIsProcessing(false); }
   };
 
-  // 표지 미리보기 렌더링
+  // 표지 미리보기 렌더링 (디자인 수정됨)
   const renderCoverPreview = (style, imgSrc, title) => {
     if (!imgSrc) return <div className="w-full h-full flex items-center justify-center bg-gray-200 text-gray-500">이미지 없음</div>;
 
     if (style === 'BAND') {
+        // 밴드 스타일: 상하 여백 균일하게, 제목 정중앙, 부드러운 폰트
         return (
           <div className="w-full h-full relative bg-white flex flex-col items-center justify-center border-4 border-yellow-400">
-            <div className="absolute top-8 text-center w-full z-10 px-2"><h1 className="text-xl font-black text-gray-800 break-keep leading-tight">{title}</h1></div>
-            <div className="w-full h-1/2 overflow-hidden my-auto border-t-4 border-b-4 border-yellow-400 bg-gray-200"><img src={imgSrc} className="w-full h-full object-cover" /></div>
-            <div className="absolute bottom-8 text-center w-full z-10"><p className="text-xs font-bold text-gray-500">2026. 01. 15</p></div>
+            {/* 상단 여백 영역 */}
+            <div className="flex-1 w-full flex items-center justify-center px-4">
+                 <h1 className="text-xl font-bold text-gray-800 break-keep leading-tight text-center font-jua" style={{ wordBreak: 'keep-all' }}>{title}</h1>
+            </div>
+            
+            {/* 중앙 이미지 (높이 50%) */}
+            <div className="w-full h-[50%] overflow-hidden bg-gray-200 border-t-4 border-b-4 border-yellow-400">
+                <img src={imgSrc} className="w-full h-full object-cover" />
+            </div>
+
+            {/* 하단 여백 영역 */}
+            <div className="flex-1 w-full flex items-center justify-center">
+                <p className="text-xs font-bold text-gray-500 font-jua">2026. 01. 15</p>
+            </div>
           </div>
         );
     } else if (style === 'FULL') {
+        // 매거진 스타일: 글씨 잘 보이게 그림자 추가, 폰트 변경
         return (
-          <div className="w-full h-full relative">
+          <div className="w-full h-full relative group">
             <img src={imgSrc} className="w-full h-full object-cover" />
-            <div className="absolute inset-0 bg-black bg-opacity-30 flex flex-col justify-center items-center p-4">
-              <h1 className="text-2xl font-black text-white text-center leading-tight drop-shadow-lg">{title}</h1>
-              <p className="text-white text-xs mt-2 opacity-90">SPECIAL EDITION</p>
-            </div>
-          </div>
-        );
-    } else if (style === 'COLLAGE') {
-        return (
-          <div className="w-full h-full bg-white relative">
-             <div className="grid grid-cols-2 grid-rows-2 w-full h-full">
-                <img src={imgSrc} className="w-full h-full object-cover opacity-90" />
-                <img src={imgSrc} className="w-full h-full object-cover opacity-70 scale-x-[-1]" />
-                <img src={imgSrc} className="w-full h-full object-cover opacity-70 scale-y-[-1]" />
-                <img src={imgSrc} className="w-full h-full object-cover opacity-90 scale-[-1]" />
-             </div>
-             <div className="absolute inset-0 flex items-center justify-center">
-                <div className="bg-white bg-opacity-90 p-3 shadow-lg text-center w-[85%]">
-                    <h1 className="text-lg font-bold text-gray-800">{title}</h1>
-                </div>
-             </div>
-          </div>
-        );
-    } else if (style === 'MODERN') {
-        return (
-          <div className="w-full h-full bg-white flex flex-col">
-            <div className="h-[70%] w-full overflow-hidden">
-              <img src={imgSrc} className="w-full h-full object-cover" />
-            </div>
-            <div className="h-[30%] flex flex-col items-center justify-center p-2 text-center">
-              <h1 className="text-lg font-bold text-gray-800 leading-tight">{title}</h1>
-              <div className="w-8 h-0.5 bg-gray-300 my-1"></div>
-              <p className="text-[10px] text-gray-500">2026. 01. 15</p>
+            {/* 그라데이션 오버레이로 글씨 가독성 확보 */}
+            <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-transparent to-black/60 flex flex-col justify-between items-center p-6">
+              <div className="mt-4 border-b-2 border-white/50 pb-1">
+                 <p className="text-white text-[10px] tracking-[0.2em] font-light">PHOTO BOOK</p>
+              </div>
+              <div className="mb-4 text-center">
+                 <h1 className="text-2xl font-bold text-white leading-tight drop-shadow-lg font-myeongjo break-keep" style={{ textShadow: '0 2px 4px rgba(0,0,0,0.5)' }}>{title}</h1>
+                 <p className="text-white/80 text-[10px] mt-2 font-light tracking-wider">2026 SPECIAL EDITION</p>
+              </div>
             </div>
           </div>
         );
@@ -429,15 +390,35 @@ function App() {
             </div>
           </div>
 
-          {/* 표지 스타일 선택 */}
+          {/* 표지 스타일 선택 (2종, 세로 배치) */}
           {coverPhotos.length > 0 && (
-            <div className="mb-8 animate-fade-in">
+            <div className="mb-8 animate-fade-in border-t border-gray-100 pt-8">
               <h2 className={STYLES.title}>디자인을 골라보세요</h2>
-              <div className="mt-4 grid grid-cols-3 gap-3">
+              <p className={STYLES.subtitle}>제목이 적용된 모습을 미리 볼 수 있어요.</p>
+              
+              <div className="mt-6 flex flex-col gap-6">
                 {COVER_STYLES.map((style) => (
-                  <div key={style.id} onClick={() => setSelectedCoverStyle(style.id)} className={`cursor-pointer rounded-xl overflow-hidden border-4 transition-all relative aspect-[220/280] shadow-md ${selectedCoverStyle === style.id ? 'border-yellow-400 scale-105 z-10 ring-4 ring-yellow-100' : 'border-gray-100'}`}>
-                    {renderCoverPreview(style.id, coverPhotos[0], "미리보기")}
-                    <div className={`absolute bottom-0 w-full text-center py-1.5 text-[10px] font-bold ${selectedCoverStyle === style.id ? 'bg-yellow-400 text-black' : 'bg-black bg-opacity-50 text-white'}`}>{style.name}</div>
+                  <div 
+                    key={style.id} 
+                    onClick={() => setSelectedCoverStyle(style.id)} 
+                    className={`cursor-pointer transition-all duration-300 transform ${selectedCoverStyle === style.id ? 'scale-[1.02]' : 'hover:scale-[1.01]'}`}
+                  >
+                    <div className={`rounded-xl overflow-hidden shadow-md border-4 relative aspect-[220/280] ${selectedCoverStyle === style.id ? 'border-yellow-400 ring-4 ring-yellow-100' : 'border-gray-200'}`}>
+                        {renderCoverPreview(style.id, coverPhotos[0], displayTitle)}
+                        
+                        {/* 선택됨 뱃지 */}
+                        {selectedCoverStyle === style.id && (
+                            <div className="absolute top-4 right-4 bg-yellow-400 text-black font-bold px-3 py-1 rounded-full shadow-lg flex items-center gap-1 z-20">
+                                <Check size={16} strokeWidth={3} /> 선택됨
+                            </div>
+                        )}
+                    </div>
+                    
+                    {/* 스타일 설명 */}
+                    <div className="mt-3 text-center">
+                        <h3 className={`text-lg font-bold ${selectedCoverStyle === style.id ? 'text-yellow-600' : 'text-gray-800'}`}>{style.name}</h3>
+                        <p className="text-sm text-gray-500">{style.desc}</p>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -521,11 +502,12 @@ function App() {
             책 만들기 (편집) <ChevronRight size={32} />
           </button>
         </div>
-        {isProcessing && <div className="absolute inset-0 bg-black bg-opacity-80 flex flex-col items-center justify-center z-50 text-white backdrop-blur-sm"><div className="w-20 h-20 border-4 border-yellow-400 border-t-transparent rounded-full animate-spin mb-6"></div><h3 className="text-3xl font-bold mb-3 text-yellow-400">잠시만요!</h3><p className="text-xl text-center leading-relaxed text-gray-200">미니가 예쁜 책을<br/>만들고 있어요 뚝딱뚝딱!</p></div>}
+        {isProcessing && <div className="absolute inset-0 bg-black bg-opacity-80 flex flex-col items-center justify-center z-50 text-white backdrop-blur-sm"><div className="w-20 h-20 border-4 border-yellow-400 border-t-transparent rounded-full animate-spin mb-6"></div><h3 className="text-3xl font-bold mb-3 text-yellow-400">주문 전송 중!</h3><p className="text-xl text-center leading-relaxed text-gray-200">미니가 예쁜 책을<br/>만들고 있어요 뚝딱뚝딱!</p></div>}
       </div>
     );
   }
 
+  // 4. 미리보기
   if (step === 'PREVIEW') {
     return (
       <div className={STYLES.container}>
@@ -536,7 +518,6 @@ function App() {
         <div className="p-6 flex-1 overflow-y-auto bg-gray-50">
           {renderProgressBar(2)}
           <h2 className={STYLES.title}>짠! 이렇게<br/>만들어질 거예요</h2>
-          <p className={STYLES.subtitle}>세로형(220x280)이라 시원시원하죠?</p>
           <div className="mt-8 mb-8">
             <h3 className="text-xl font-bold text-gray-800 mb-3 px-2 border-l-4 border-yellow-400">표지 디자인</h3>
             <div className="aspect-[220/280] bg-white rounded-lg shadow-2xl overflow-hidden relative border border-gray-200 transform rotate-1 mx-auto w-3/4">
@@ -570,6 +551,7 @@ function App() {
     );
   }
 
+  // 5. 배송지 입력
   if (step === 'ADDRESS') {
     return (
       <div className={STYLES.container}>
@@ -579,7 +561,6 @@ function App() {
         </div>
         <div className="p-6 flex-1 overflow-y-auto">
           {renderProgressBar(3)}
-          
           <div className="mb-10 bg-yellow-50 p-6 rounded-3xl border border-yellow-200 text-center">
             <h2 className="text-2xl font-extrabold text-gray-900 mb-2">몇 권을<br/>만들어드릴까요?</h2>
             <p className="text-gray-600 mb-6 text-sm">가족, 친구들과 추억을 나눠보세요!</p>
@@ -592,7 +573,6 @@ function App() {
           </div>
 
           <h2 className="text-2xl font-bold text-gray-900 mb-2">어디로<br/>보내드릴까요?</h2>
-          <p className={STYLES.subtitle}>받으시는 분 정보를 정확히 적어주세요.</p>
           <div className="mt-6 space-y-6">
             <div>
               <label className="block text-xl font-bold text-gray-700 mb-2">받는 분 성함</label>
@@ -600,35 +580,11 @@ function App() {
             </div>
             <div>
               <label className="block text-xl font-bold text-gray-700 mb-2">전화번호</label>
-              <input 
-                type="tel" 
-                placeholder="010-0000-0000" 
-                className={STYLES.input} 
-                value={address.phone} 
-                onChange={handlePhoneChange} 
-                maxLength={13}
-              />
+              <input type="tel" placeholder="010-0000-0000" className={STYLES.input} value={address.phone} onChange={handlePhoneChange} maxLength={13} />
             </div>
             <div>
               <label className="block text-xl font-bold text-gray-700 mb-2">주소</label>
-              <button 
-                onClick={handlePostcode}
-                className="w-full bg-gray-100 p-4 rounded-xl text-left text-lg flex items-center gap-3 text-gray-600 hover:bg-gray-200 mb-2 border-2 border-gray-200"
-              >
-                <MapPin size={24} className="text-gray-500"/> {address.zip ? `(${address.zip}) 우편번호 변경` : '우편번호 찾기'}
-              </button>
-              {address.zip && (
-                <div className="mb-2 p-3 bg-gray-50 rounded-lg text-gray-700 border border-gray-200">
-                    {address.addr}
-                </div>
-              )}
-              <input 
-                id="detailAddr"
-                type="text" 
-                placeholder="상세 주소를 입력해주세요 (예: 101동 101호)" 
-                className={STYLES.input} 
-              />
-            </div>
+              <button onClick={handlePostcode} className="w-full bg-gray-100 p-4 rounded-xl text-left text-lg flex items-center gap-3 text-gray-600 hover:bg-gray-200 mb-2 border-2 border-gray-200"><MapPin size={24} className="text-gray-500"/> {address.zip ? `(${address.zip}) 우편번호 변경` : '우편번호 찾기'}</button>{address.zip && <div className="mb-2 p-3 bg-gray-50 rounded-lg text-gray-700 border border-gray-200">{address.addr}</div>}<input id="detailAddr" type="text" placeholder="상세 주소를 입력해주세요" className={STYLES.input} /></div>
           </div>
         </div>
         <div className="p-6 bg-white border-t border-gray-100">
@@ -645,6 +601,7 @@ function App() {
     );
   }
 
+  // 6. 완료 화면
   if (step === 'DONE') {
     return (
       <div className={STYLES.container}>
@@ -656,7 +613,7 @@ function App() {
             <h3 className="font-bold text-gray-500 mb-2">배송 정보</h3>
             <p className="text-2xl font-bold text-gray-800">{address.name} 님</p>
             <p className="text-lg text-gray-600 mt-1">{address.phone}</p>
-            <p className="text-lg text-gray-600 mt-1">({address.zip}) {address.addr}</p>
+            <p className="text-lg text-gray-600 mt-1">{address.addr}</p>
             <div className="mt-4 pt-4 border-t border-gray-200 flex justify-between items-center"><span className="text-gray-500 font-bold">주문 수량</span><span className="text-xl font-black text-indigo-600">{quantity}권</span></div>
           </div>
           <div className="mt-auto w-full pt-8">
