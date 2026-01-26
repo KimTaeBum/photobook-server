@@ -44,7 +44,6 @@ const SUGGESTED_TITLES = [
   "나의 즐거운 취미생활", "주말엔 훌쩍 떠나요", "사랑스러운 나의 반려동물"
 ];
 
-// 표지 스타일 정의 (2종)
 const COVER_STYLES = [
   { id: 'BAND', name: '밴드 스타일', desc: '사진과 글이 조화롭게' },
   { id: 'FULL', name: '매거진 스타일', desc: '사진을 꽉 차게' }
@@ -65,9 +64,12 @@ function App() {
   const [quantity, setQuantity] = useState(1);
   const [isProcessing, setIsProcessing] = useState(false);
   const [selectedCoverStyle, setSelectedCoverStyle] = useState('BAND');
+  
+  // [추가] 알림 메시지 상태 (팝업용)
+  const [alertMsg, setAlertMsg] = useState('');
 
   useEffect(() => {
-    // 폰트 및 애니메이션 스타일 (주아체 + 나눔명조 추가)
+    // 폰트 및 애니메이션 스타일 주입
     const style = document.createElement('style');
     style.innerHTML = `
       @import url('https://fonts.googleapis.com/css2?family=Jua&family=Nanum+Myeongjo:wght@700&display=swap');
@@ -95,10 +97,12 @@ function App() {
     };
     checkTailwind();
 
+    // 다음 우편번호 서비스 로드
     const daumScript = document.createElement('script');
     daumScript.src = "//t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js";
     document.body.appendChild(daumScript);
 
+    // 카카오 SDK 초기화
     if (!window.Kakao) {
       const script = document.createElement('script');
       script.src = 'https://developers.kakao.com/sdk/js/kakao.js';
@@ -128,9 +132,7 @@ function App() {
   };
 
   const oneBookCost = calculateOneBookCost(insidePhotos.length);
-  const productionCost = oneBookCost * quantity;
-  const shippingCost = 3500;
-  const totalCost = productionCost + shippingCost;
+  const totalCost = (oneBookCost * quantity) + 3500;
   const totalPages = Math.max(20, Math.ceil(insidePhotos.length / 2));
 
   const renderProgressBar = (currentStepIdx) => (
@@ -141,17 +143,40 @@ function App() {
     </div>
   );
 
+  // [수술 완료] 사진 업로드 시 중복 체크 기능 추가
   const handlePhotoUpload = (e, type) => {
     if (!e.target.files) return;
     const files = Array.from(e.target.files);
-    const newPhotos = files.map(file => URL.createObjectURL(file));
-
+    
     if (type === 'cover') {
-      setCoverPhotos([newPhotos[0]]);
-      setCoverFiles([files[0]]);
+      const file = files[0];
+      setCoverPhotos([URL.createObjectURL(file)]);
+      setCoverFiles([file]);
     } else {
-      setInsidePhotos(prev => [...prev, ...newPhotos]);
-      setInsideFiles(prev => [...prev, ...files]);
+      let duplicateCount = 0;
+      const validFiles = [];
+      
+      files.forEach(file => {
+        // 이미 들어있는 파일 중 이름과 크기가 모두 같은 것이 있는지 검사
+        const isDuplicate = insideFiles.some(existing => 
+            existing.name === file.name && existing.size === file.size
+        );
+        
+        if (isDuplicate) {
+          duplicateCount++;
+        } else {
+          validFiles.push(file);
+        }
+      });
+
+      // 중복된 게 있으면 대장님께 보고!
+      if (duplicateCount > 0) {
+        setAlertMsg(`이미 추가된 사진 ${duplicateCount}장은 제외하고 추가했어요!`);
+      }
+
+      const newPhotoUrls = validFiles.map(file => URL.createObjectURL(file));
+      setInsidePhotos(prev => [...prev, ...newPhotoUrls]);
+      setInsideFiles(prev => [...prev, ...validFiles]);
     }
   };
 
@@ -165,12 +190,16 @@ function App() {
     if (newQuantity >= 1) setQuantity(newQuantity);
   };
 
+  // 전화번호 자동 하이픈 및 끊김 방지
   const handlePhoneChange = (e) => {
-    const value = e.target.value.replace(/[^0-9]/g, '');
-    if (e.target.value !== value) {
-       alert("숫자만 입력해주세요!");
-       return; 
+    const inputVal = e.target.value;
+    
+    if (inputVal.length > address.phone.length && inputVal[inputVal.length - 1] === '-') {
+      setAlertMsg("숫자만 입력해주세요! 하이픈(-)은 자동으로 생깁니다.");
+      return;
     }
+
+    const value = inputVal.replace(/[^0-9]/g, '');
     let formatted = value;
     if (value.length < 4) { formatted = value; } 
     else if (value.length < 7) { formatted = value.substr(0, 3) + '-' + value.substr(3); } 
@@ -180,7 +209,7 @@ function App() {
   };
 
   const handlePostcode = () => {
-    new daum.Postcode({
+    new window.daum.Postcode({
         oncomplete: function(data) {
             setAddress(prev => ({ ...prev, zip: data.zonecode, addr: data.address }));
         }
@@ -194,29 +223,30 @@ function App() {
                 window.Kakao.API.request({
                     url: '/v2/user/me',
                     success: function(res) {
-                        const nickname = res.properties?.nickname || '';
+                        const nickname = res.properties && res.properties.nickname ? res.properties.nickname : '';
                         if(nickname) setAddress(prev => ({...prev, name: nickname}));
                         setStep('COVER');
                     },
                     fail: function(error) {
-                        alert('사용자 정보 가져오기 실패: ' + JSON.stringify(error));
+                        setAlertMsg('사용자 정보 가져오기 실패!');
                         setStep('COVER');
                     }
                 });
             },
             fail: function(err) {
-                alert('로그인 실패! 카카오 설정을 확인해주세요.');
+                setAlertMsg('로그인 실패! 카카오 설정을 확인해주세요.');
             },
         });
     } else {
-        alert("카카오 SDK 로딩 중... 잠시 후 다시 시도해주세요.");
+        setAlertMsg("카카오 SDK 로딩 중...");
     }
   };
 
+  // 주문 전송 경로 동적 인식
   const handleOrderSubmit = async () => {
     setIsProcessing(true);
-    const serverIp = window.location.hostname;
-    const API_URL = `http://${serverIp}:8000/api/order`;
+    const serverHostname = window.location.hostname;
+    const API_URL = `http://${serverHostname}:8000/api/order`;
 
     const formData = new FormData();
     if (coverFiles.length > 0) formData.append('cover_photo', coverFiles[0]);
@@ -231,48 +261,42 @@ function App() {
 
     try {
         const response = await fetch(API_URL, { method: 'POST', body: formData });
-        if (response.ok) { setStep('DONE'); } 
-        else { alert("주문 전송 실패! 서버(main.py)가 켜져 있는지 확인해주세요."); }
-    } catch (error) { alert(`서버(${API_URL}) 연결 오류!`); } 
-    finally { setIsProcessing(false); }
+        if (response.ok) {
+          setStep('DONE');
+        } else {
+          setAlertMsg(`주문 전송 실패! 서버(${API_URL})를 확인해주세요.`);
+        }
+    } catch (error) {
+        setAlertMsg(`서버(${API_URL}) 연결 오류! main.py 실행 여부를 확인해주세요.`);
+    } finally {
+        setIsProcessing(false);
+    }
   };
 
-  // 표지 미리보기 렌더링 (디자인 수정됨)
   const renderCoverPreview = (style, imgSrc, title) => {
-    if (!imgSrc) return <div className="w-full h-full flex items-center justify-center bg-gray-200 text-gray-500">이미지 없음</div>;
-
+    if (!imgSrc) return <div className="w-full h-full flex items-center justify-center bg-gray-200 text-gray-500 font-jua">이미지 없음</div>;
     if (style === 'BAND') {
-        // 밴드 스타일: 상하 여백 균일하게, 제목 정중앙, 부드러운 폰트
         return (
           <div className="w-full h-full relative bg-white flex flex-col items-center justify-center border-4 border-yellow-400">
-            {/* 상단 여백 영역 */}
             <div className="flex-1 w-full flex items-center justify-center px-4">
-                 <h1 className="text-xl font-bold text-gray-800 break-keep leading-tight text-center font-jua" style={{ wordBreak: 'keep-all' }}>{title}</h1>
+                 <h1 className="text-xl font-bold text-gray-800 break-keep leading-tight text-center font-jua">{title}</h1>
             </div>
-            
-            {/* 중앙 이미지 (높이 50%) */}
             <div className="w-full h-[50%] overflow-hidden bg-gray-200 border-t-4 border-b-4 border-yellow-400">
                 <img src={imgSrc} className="w-full h-full object-cover" />
             </div>
-
-            {/* 하단 여백 영역 */}
             <div className="flex-1 w-full flex items-center justify-center">
                 <p className="text-xs font-bold text-gray-500 font-jua">2026. 01. 15</p>
             </div>
           </div>
         );
     } else if (style === 'FULL') {
-        // 매거진 스타일: 글씨 잘 보이게 그림자 추가, 폰트 변경
         return (
           <div className="w-full h-full relative group">
             <img src={imgSrc} className="w-full h-full object-cover" />
-            {/* 그라데이션 오버레이로 글씨 가독성 확보 */}
-            <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-transparent to-black/60 flex flex-col justify-between items-center p-6">
-              <div className="mt-4 border-b-2 border-white/50 pb-1">
-                 <p className="text-white text-[10px] tracking-[0.2em] font-light">PHOTO BOOK</p>
-              </div>
-              <div className="mb-4 text-center">
-                 <h1 className="text-2xl font-bold text-white leading-tight drop-shadow-lg font-myeongjo break-keep" style={{ textShadow: '0 2px 4px rgba(0,0,0,0.5)' }}>{title}</h1>
+            <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-transparent to-black/60 flex flex-col justify-between items-center p-6 text-white text-center">
+              <p className="mt-4 text-[10px] tracking-[0.2em] font-light border-b border-white/50 pb-1">PHOTO BOOK</p>
+              <div className="mb-4">
+                 <h1 className="text-2xl font-bold leading-tight drop-shadow-lg font-myeongjo break-keep" style={{ textShadow: '0 2px 4px rgba(0,0,0,0.5)' }}>{title}</h1>
                  <p className="text-white/80 text-[10px] mt-2 font-light tracking-wider">2026 SPECIAL EDITION</p>
               </div>
             </div>
@@ -282,27 +306,31 @@ function App() {
     return null;
   };
 
-  if (!isReady) return <div className="min-h-screen bg-white flex items-center justify-center text-gray-400">로딩중...</div>;
+  if (!isReady) return <div className="min-h-screen bg-white flex items-center justify-center text-gray-400 font-jua">로딩중...</div>;
 
-  // 1. 홈 화면
-  if (step === 'HOME') {
-    return (
-      <div className={STYLES.container}>
+  return (
+    <div className={STYLES.container}>
+      {/* 커스텀 알림 팝업 (모달) */}
+      {alertMsg && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/50 backdrop-blur-sm">
+          <div className="bg-white rounded-3xl p-8 shadow-2xl max-w-xs w-full text-center space-y-4 animate-gentle-float">
+            <div className="w-16 h-16 bg-yellow-100 rounded-full flex items-center justify-center mx-auto text-yellow-500">
+              <AlertCircle size={40} />
+            </div>
+            <p className="text-lg font-bold text-gray-800 break-keep font-jua">{alertMsg}</p>
+            <button onClick={() => setAlertMsg('')} className="w-full bg-gray-800 text-white py-3 rounded-xl font-bold font-jua">확인</button>
+          </div>
+        </div>
+      )}
+
+      {/* 1. 홈 화면 */}
+      {step === 'HOME' && (
         <div className="flex-1 flex flex-col justify-center items-center p-8 text-center space-y-8 bg-yellow-50">
           <div>
-            <div className="inline-block bg-yellow-100 text-yellow-900 px-4 py-1.5 rounded-full text-lg font-jua mb-4 shadow-sm border border-yellow-200">
-              정말 쉽고 빠른 포토북
-            </div>
-            <h1 className="text-5xl font-jua text-gray-800 mb-4 leading-tight drop-shadow-sm">
-              원없이 담는<br/>자동 포토북
-            </h1>
-            <p className="text-xl text-gray-600 leading-relaxed font-medium font-jua opacity-90">
-              40장도, 400장도 OK!<br/>
-              사진만 고르면 페이지가<br/>
-              알아서 척척 늘어나요.
-            </p>
+            <div className="inline-block bg-yellow-100 text-yellow-900 px-4 py-1.5 rounded-full text-lg font-jua mb-4 shadow-sm border border-yellow-200">정말 쉽고 빠른 포토북</div>
+            <h1 className="text-5xl font-jua text-gray-800 mb-4 leading-tight drop-shadow-sm">원없이 담는<br/>자동 포토북</h1>
+            <p className="text-xl text-gray-600 leading-relaxed font-medium font-jua opacity-90">40장도, 400장도 OK!<br/>사진만 고르면 페이지가<br/>알아서 척척 늘어나요.</p>
           </div>
-
           <div className="relative group cursor-pointer animate-gentle-float" onClick={() => setStep('COVER')}>
             <div className="absolute inset-0 bg-yellow-300 rounded-full blur-xl opacity-50"></div>
             <div className="w-48 h-48 bg-yellow-400 hover:bg-yellow-500 rounded-full flex flex-col items-center justify-center shadow-2xl transform transition hover:scale-105 active:scale-95 border-4 border-white relative z-10">
@@ -311,7 +339,6 @@ function App() {
             </div>
           </div>
           <p className="text-gray-500 font-bold animate-pulse text-lg font-jua">👆 위 동그라미를 눌러보세요!</p>
-
           <div className="w-full pt-6 border-t border-yellow-200">
             <button onClick={() => setStep('SIGNUP')} className={STYLES.kakaoBtn}>
               <MessageCircle size={24} fill="#3c1e1e" strokeWidth={0} />
@@ -320,311 +347,209 @@ function App() {
             <p className="text-gray-400 text-sm mt-2 font-jua">이미 가입하셨다면 눌러주세요</p>
           </div>
         </div>
-      </div>
-    );
-  }
+      )}
 
-  // 1.5 회원가입 화면
-  if (step === 'SIGNUP') {
-    return (
-      <div className={STYLES.container}>
-        <div className={STYLES.header}>
-          <button onClick={() => setStep('HOME')} className="mr-4"><ArrowLeft size={32}/></button>
-          <span className="text-xl font-bold">회원가입</span>
-        </div>
-        <div className="flex-1 flex flex-col justify-center items-center p-8 text-center space-y-8">
-          <div className="w-24 h-24 bg-[#FEE500] rounded-2xl flex items-center justify-center mb-4">
-             <MessageCircle size={48} fill="#3c1e1e" strokeWidth={0} />
+      {/* 1.5 회원가입 */}
+      {step === 'SIGNUP' && (
+        <div className="flex-1 flex flex-col items-center justify-center p-8 text-center space-y-8">
+          <div className={STYLES.header + " absolute top-0 left-0 right-0 w-full"}>
+            <button onClick={() => setStep('HOME')} className="mr-4"><ArrowLeft size={32}/></button>
+            <span className="text-xl font-bold">회원가입</span>
           </div>
-          <h2 className="text-3xl font-bold text-gray-800">반가워요 대장님!</h2>
-          <p className="text-xl text-gray-600">카카오톡으로 간편하게<br/>가입하고 시작할까요?</p>
+          <div className="w-24 h-24 bg-[#FEE500] rounded-2xl flex items-center justify-center mb-4"><MessageCircle size={48} fill="#3c1e1e" strokeWidth={0} /></div>
+          <h2 className="text-3xl font-bold text-gray-800 font-jua">반가워요 대장님!</h2>
+          <p className="text-xl text-gray-600 font-jua">카카오톡으로 간편하게<br/>가입하고 시작할까요?</p>
           <div className="w-full space-y-4 pt-8">
-            <button onClick={handleKakaoLogin} className="w-full bg-[#FEE500] hover:bg-[#FDD835] text-[#3c1e1e] text-xl font-bold py-5 rounded-2xl shadow-md transform transition active:scale-95 flex items-center justify-center gap-3">
-              <MessageCircle size={28} fill="#3c1e1e" strokeWidth={0} /> 카카오로 3초 만에 가입하기
-            </button>
-            <button onClick={() => setStep('COVER')} className="text-gray-400 text-lg underline decoration-1 underline-offset-4">
-              다음에 할게요 (비회원 주문)
-            </button>
+            <button onClick={handleKakaoLogin} className="w-full bg-[#FEE500] hover:bg-[#FDD835] text-[#3c1e1e] text-xl font-bold py-5 rounded-2xl shadow-md transform transition active:scale-95 flex items-center justify-center gap-3 font-jua"><MessageCircle size={28} fill="#3c1e1e" strokeWidth={0} /> 카카오로 3초 만에 가입하기</button>
+            <button onClick={() => setStep('COVER')} className="text-gray-400 text-lg underline decoration-1 underline-offset-4 font-jua">다음에 할게요 (비회원 주문)</button>
           </div>
         </div>
-      </div>
-    );
-  }
+      )}
 
-  // 2. 표지 사진 선택
-  if (step === 'COVER') {
-    return (
-      <div className={STYLES.container}>
-        <div className={STYLES.header}>
-          <button onClick={() => setStep('HOME')} className="mr-4"><ArrowLeft size={32}/></button>
-          <span className="text-xl font-bold">1단계: 표지 만들기</span>
-        </div>
-        <div className="p-6 flex-1 overflow-y-auto">
-          {renderProgressBar(0)}
-          
-          <div className="mb-8">
-            <h2 className={STYLES.title}>표지 사진을<br/>골라주세요</h2>
-            <p className={STYLES.subtitle}>
-              제일 잘 나온 사진 <span className="text-yellow-600 font-bold">딱 1장</span>만!
-            </p>
-            
-            <div className="mt-6">
-              <label className="w-full aspect-video bg-gray-100 rounded-2xl border-4 border-dashed border-gray-300 flex flex-col items-center justify-center cursor-pointer hover:bg-gray-50 active:bg-gray-200 transition relative overflow-hidden group">
-                <input type="file" accept="image/*" className="hidden" onChange={(e) => handlePhotoUpload(e, 'cover')} />
-                {coverPhotos.length > 0 ? (
-                  <>
-                    <img src={coverPhotos[0]} alt="Selected Cover" className="w-full h-full object-cover absolute inset-0 opacity-100 group-hover:opacity-90 transition" />
-                    <div className="absolute inset-0 bg-black bg-opacity-20 flex items-center justify-center">
-                      <div className="bg-white px-6 py-3 rounded-full shadow-lg flex items-center gap-2">
-                        <Camera size={24} className="text-gray-700" /> <span className="font-bold text-gray-800">사진 변경하기</span>
+      {/* 2. 표지 만들기 */}
+      {step === 'COVER' && (
+        <>
+          <div className={STYLES.header}><button onClick={() => setStep('HOME')} className="mr-4"><ArrowLeft size={32}/></button><span className="text-xl font-bold">1단계: 표지 만들기</span></div>
+          <div className="p-6 flex-1 overflow-y-auto">
+            {renderProgressBar(0)}
+            <div className="mb-8">
+              <h2 className={STYLES.title}>표지 사진을<br/>골라주세요</h2>
+              <p className={STYLES.subtitle}>제일 잘 나온 사진 <span className="text-yellow-600 font-bold">딱 1장</span>만!</p>
+              <div className="mt-6">
+                <label className="w-full aspect-video bg-gray-100 rounded-2xl border-4 border-dashed border-gray-300 flex flex-col items-center justify-center cursor-pointer hover:bg-gray-50 transition relative overflow-hidden group">
+                  <input type="file" accept="image/*" className="hidden" onChange={(e) => handlePhotoUpload(e, 'cover')} />
+                  {coverPhotos.length > 0 ? (
+                    <>
+                      <img src={coverPhotos[0]} className="w-full h-full object-cover absolute inset-0 opacity-100 group-hover:opacity-90 transition" />
+                      <div className="absolute inset-0 bg-black bg-opacity-20 flex items-center justify-center">
+                        <div className="bg-white px-6 py-3 rounded-full shadow-lg flex items-center gap-2"><Camera size={24} className="text-gray-700" /><span className="font-bold text-gray-800">사진 변경하기</span></div>
                       </div>
+                    </>
+                  ) : (
+                    <><div className="bg-white p-4 rounded-full shadow-sm mb-3"><Camera size={40} className="text-yellow-500" /></div><span className="text-gray-500 font-bold text-xl">여기를 눌러 사진 선택</span></>
+                  )}
+                </label>
+              </div>
+            </div>
+
+            {coverPhotos.length > 0 && (
+              <div className="mb-8 animate-fade-in border-t border-gray-100 pt-8">
+                <h2 className={STYLES.title}>디자인을 골라보세요</h2>
+                <p className={STYLES.subtitle}>제목이 적용된 모습을 미리 볼 수 있어요.</p>
+                <div className="mt-6 flex flex-col gap-6">
+                  {COVER_STYLES.map((style) => (
+                    <div key={style.id} onClick={() => setSelectedCoverStyle(style.id)} className={`cursor-pointer transition-all duration-300 transform ${selectedCoverStyle === style.id ? 'scale-[1.02]' : 'hover:scale-[1.01]'}`}>
+                      <div className={`rounded-xl overflow-hidden shadow-md border-4 relative aspect-[220/280] ${selectedCoverStyle === style.id ? 'border-yellow-400 ring-4 ring-yellow-100' : 'border-gray-200'}`}>
+                          {renderCoverPreview(style.id, coverPhotos[0], displayTitle)}
+                          {selectedCoverStyle === style.id && (<div className="absolute top-4 right-4 bg-yellow-400 text-black font-bold px-3 py-1 rounded-full shadow-lg flex items-center gap-1 z-20"><Check size={16} strokeWidth={3} /> 선택됨</div>)}
+                      </div>
+                      <div className="mt-3 text-center"><h3 className={`text-lg font-bold ${selectedCoverStyle === style.id ? 'text-yellow-600' : 'text-gray-800'}`}>{style.name}</h3><p className="text-sm text-gray-500">{style.desc}</p></div>
                     </div>
-                  </>
-                ) : (
-                  <>
-                    <div className="bg-white p-4 rounded-full shadow-sm mb-3"><Camera size={40} className="text-yellow-500" /></div>
-                    <span className="text-gray-500 font-bold text-xl">여기를 눌러 사진 선택</span>
-                  </>
-                )}
-              </label>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="mb-8">
+              <h2 className={STYLES.title}>제목을 지어주세요</h2>
+              <div className="mt-4 relative">
+                <input type="text" className={`${STYLES.input} pr-12`} placeholder="예: 행복한 하루하루" value={coverTitle} onChange={(e) => setCoverTitle(e.target.value)} />
+                <div className="absolute right-4 top-1/2 transform -translate-y-1/2 text-gray-400"><Edit3 size={24} /></div>
+              </div>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <span className="text-sm text-gray-500 w-full mb-1">💡 이런 제목은 어때요? (터치해보세요)</span>
+                {SUGGESTED_TITLES.map((t, i) => <button key={i} onClick={() => setCoverTitle(t)} className={STYLES.tag}>{t}</button>)}
+              </div>
             </div>
           </div>
+          <div className="p-6 bg-white border-t border-gray-100"><button onClick={() => setStep('INSIDE')} disabled={coverPhotos.length === 0} className={STYLES.primaryBtn}>다음으로 가기 <ChevronRight size={32} /></button></div>
+        </>
+      )}
 
-          {/* 표지 스타일 선택 (2종, 세로 배치) */}
-          {coverPhotos.length > 0 && (
-            <div className="mb-8 animate-fade-in border-t border-gray-100 pt-8">
-              <h2 className={STYLES.title}>디자인을 골라보세요</h2>
-              <p className={STYLES.subtitle}>제목이 적용된 모습을 미리 볼 수 있어요.</p>
-              
-              <div className="mt-6 flex flex-col gap-6">
-                {COVER_STYLES.map((style) => (
-                  <div 
-                    key={style.id} 
-                    onClick={() => setSelectedCoverStyle(style.id)} 
-                    className={`cursor-pointer transition-all duration-300 transform ${selectedCoverStyle === style.id ? 'scale-[1.02]' : 'hover:scale-[1.01]'}`}
-                  >
-                    <div className={`rounded-xl overflow-hidden shadow-md border-4 relative aspect-[220/280] ${selectedCoverStyle === style.id ? 'border-yellow-400 ring-4 ring-yellow-100' : 'border-gray-200'}`}>
-                        {renderCoverPreview(style.id, coverPhotos[0], displayTitle)}
-                        
-                        {/* 선택됨 뱃지 */}
-                        {selectedCoverStyle === style.id && (
-                            <div className="absolute top-4 right-4 bg-yellow-400 text-black font-bold px-3 py-1 rounded-full shadow-lg flex items-center gap-1 z-20">
-                                <Check size={16} strokeWidth={3} /> 선택됨
-                            </div>
-                        )}
-                    </div>
-                    
-                    {/* 스타일 설명 */}
-                    <div className="mt-3 text-center">
-                        <h3 className={`text-lg font-bold ${selectedCoverStyle === style.id ? 'text-yellow-600' : 'text-gray-800'}`}>{style.name}</h3>
-                        <p className="text-sm text-gray-500">{style.desc}</p>
-                    </div>
+      {/* 3. 내용 고르기 */}
+      {step === 'INSIDE' && (
+        <>
+          <div className={STYLES.header}><button onClick={() => setStep('COVER')} className="mr-4"><ArrowLeft size={32}/></button><span className="text-xl font-bold">2단계: 내용 고르기</span></div>
+          <div className="p-6 flex-1 overflow-y-auto">
+            {renderProgressBar(1)}
+            <h2 className={STYLES.title}>사진을 몽땅<br/>넣어주세요</h2>
+            <p className={STYLES.subtitle}><span className="font-bold text-gray-900">최소 40장</span>은 있어야 책이 만들어져요.<br/>(가로, 세로 섞여도 OK!)</p>
+            <div className="mt-8">
+              <label className="w-full h-32 bg-yellow-50 rounded-2xl border-4 border-dashed border-yellow-300 flex items-center justify-center cursor-pointer mb-6 active:scale-95 transition hover:bg-yellow-100">
+                <input type="file" multiple accept="image/*" className="hidden" onChange={(e) => handlePhotoUpload(e, 'inside')} />
+                <div className="flex items-center gap-3"><ImageIcon size={40} className="text-yellow-600" /><span className="text-yellow-700 font-bold text-2xl">사진 한꺼번에 추가 +</span></div>
+              </label>
+              <div className="mb-4">
+                <div className="flex justify-between text-sm font-bold mb-1"><span className={insidePhotos.length >= 40 ? "text-green-600" : "text-red-500"}>{insidePhotos.length}장 선택됨</span><span className="text-gray-400">목표: 40장</span></div>
+                <div className="w-full bg-gray-200 rounded-full h-3 overflow-hidden"><div className={`h-full transition-all duration-500 ${insidePhotos.length >= 40 ? 'bg-green-500' : 'bg-red-400'}`} style={{ width: `${Math.min(100, (insidePhotos.length / 40) * 100)}%` }}></div></div>
+                {insidePhotos.length < 40 && <p className="text-red-500 text-sm mt-1 font-medium flex items-center gap-1 font-jua"><AlertCircle size={14}/> {40 - insidePhotos.length}장 더 넣어주세요!</p>}
+              </div>
+              <div className="grid grid-cols-4 gap-2 pb-10">
+                {insidePhotos.map((src, idx) => (
+                  <div key={idx} className="aspect-square relative rounded-lg overflow-hidden shadow-sm bg-gray-100 border border-gray-200 group">
+                    <img src={src} className="w-full h-full object-cover" /><button onClick={() => removeInsidePhoto(idx)} className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-1 shadow-md opacity-80 hover:opacity-100 transition"><X size={14} /></button>
                   </div>
                 ))}
+                {insidePhotos.length === 0 && <div className="col-span-4 text-center py-10 bg-gray-50 rounded-xl border border-gray-100 font-jua"><p className="text-gray-400 text-lg">위 버튼을 눌러<br/>사진을 넉넉히 골라주세요</p></div>}
               </div>
             </div>
-          )}
+          </div>
+          <div className="p-6 bg-white border-t border-gray-100 shadow-[0_-5px_20px_rgba(0,0,0,0.05)]">
+            <div className="flex justify-between items-end mb-4">
+              <div><p className="text-gray-500 font-medium">예상 페이지: 약 {totalPages}p</p><p className="text-3xl font-black text-gray-900 font-jua">{oneBookCost.toLocaleString()}원</p></div>
+              {insidePhotos.length >= 40 ? <span className="bg-green-100 text-green-700 px-3 py-1 rounded-full text-sm font-bold border border-green-200">제작 가능!</span> : <span className="bg-red-100 text-red-600 px-3 py-1 rounded-full text-sm font-bold border border-red-200 animate-pulse">사진 부족</span>}
+            </div>
+            <button onClick={() => { setIsProcessing(true); setTimeout(() => { setIsProcessing(false); setStep('PREVIEW'); }, 2000); }} disabled={insidePhotos.length < 40} className={STYLES.primaryBtn}>책 만들기 (편집) <ChevronRight size={32} /></button>
+          </div>
+          {isProcessing && <div className="absolute inset-0 bg-black bg-opacity-80 flex flex-col items-center justify-center z-50 text-white backdrop-blur-sm"><div className="w-20 h-20 border-4 border-yellow-400 border-t-transparent rounded-full animate-spin mb-6"></div><h3 className="text-3xl font-bold mb-3 text-yellow-400 font-jua">잠시만요!</h3><p className="text-xl text-center leading-relaxed text-gray-200 font-jua">미니가 예쁜 책을<br/>만들고 있어요 뚝딱뚝딱!</p></div>}
+        </>
+      )}
 
-          <div className="mb-8">
-            <h2 className={STYLES.title}>제목을 지어주세요</h2>
-            <div className="mt-4 relative">
-              <input type="text" className={`${STYLES.input} pr-12`} placeholder="예: 행복한 하루하루" value={coverTitle} onChange={(e) => setCoverTitle(e.target.value)} />
-              <div className="absolute right-4 top-1/2 transform -translate-y-1/2 text-gray-400"><Edit3 size={24} /></div>
-            </div>
-            <div className="mt-4 flex flex-wrap gap-2">
-              <span className="text-sm text-gray-500 w-full mb-1">💡 이런 제목은 어때요? (터치해보세요)</span>
-              {SUGGESTED_TITLES.map((t, i) => <button key={i} onClick={() => setCoverTitle(t)} className={STYLES.tag}>{t}</button>)}
-            </div>
-          </div>
-        </div>
-        <div className="p-6 bg-white border-t border-gray-100">
-          <button onClick={() => setStep('INSIDE')} disabled={coverPhotos.length === 0} className={STYLES.primaryBtn}>
-            다음으로 가기 <ChevronRight size={32} />
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  // 3. 내지 사진 선택
-  if (step === 'INSIDE') {
-    const isEnough = insidePhotos.length >= 40;
-    return (
-      <div className={STYLES.container}>
-        <div className={STYLES.header}>
-          <button onClick={() => setStep('COVER')} className="mr-4"><ArrowLeft size={32}/></button>
-          <span className="text-xl font-bold">2단계: 내용 고르기</span>
-        </div>
-        <div className="p-6 flex-1 overflow-y-auto">
-          {renderProgressBar(1)}
-          <h2 className={STYLES.title}>사진을 몽땅<br/>넣어주세요</h2>
-          <p className={STYLES.subtitle}>
-            <span className="font-bold text-gray-800">최소 40장</span>은 있어야 책이 만들어져요.<br/>
-            (가로, 세로 섞여도 OK!)
-          </p>
-          <div className="mt-8">
-             <label className="w-full h-32 bg-yellow-50 rounded-2xl border-4 border-dashed border-yellow-300 flex items-center justify-center cursor-pointer mb-6 active:scale-95 transition hover:bg-yellow-100">
-              <input type="file" multiple accept="image/*" className="hidden" onChange={(e) => handlePhotoUpload(e, 'inside')} />
-              <div className="flex items-center gap-3">
-                <ImageIcon size={40} className="text-yellow-600" /><span className="text-yellow-700 font-bold text-2xl">사진 한꺼번에 추가 +</span>
-              </div>
-            </label>
-            <div className="mb-4">
-              <div className="flex justify-between text-sm font-bold mb-1">
-                <span className={isEnough ? "text-green-600" : "text-red-500"}>{insidePhotos.length}장 선택됨</span>
-                <span className="text-gray-400">목표: 40장</span>
-              </div>
-              <div className="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
-                <div className={`h-full transition-all duration-500 ${isEnough ? 'bg-green-500' : 'bg-red-400'}`} style={{ width: `${Math.min(100, (insidePhotos.length / 40) * 100)}%` }}></div>
-              </div>
-              {!isEnough && <p className="text-red-500 text-sm mt-1 font-medium flex items-center gap-1"><AlertCircle size={14}/> {40 - insidePhotos.length}장 더 넣어주세요!</p>}
-            </div>
-            <div className="grid grid-cols-4 gap-2">
-              {insidePhotos.map((src, idx) => (
-                <div key={idx} className="aspect-square relative rounded-lg overflow-hidden shadow-sm bg-gray-100 border border-gray-200 group">
-                  <img src={src} alt="inside" className="w-full h-full object-cover" />
-                  <button onClick={() => removeInsidePhoto(idx)} className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-1 shadow-md opacity-80 hover:opacity-100 transition"><X size={14} /></button>
-                </div>
-              ))}
-              {insidePhotos.length === 0 && <div className="col-span-4 text-center py-10 bg-gray-50 rounded-xl border border-gray-100"><p className="text-gray-400 text-lg">위 버튼을 눌러<br/>사진을 넉넉히 골라주세요</p></div>}
-            </div>
-          </div>
-        </div>
-        <div className="p-6 bg-white border-t border-gray-100 shadow-[0_-5px_20px_rgba(0,0,0,0.05)]">
-          <div className="flex justify-between items-end mb-4">
-            <div>
-              <p className="text-gray-500 font-medium">예상 페이지: 약 {totalPages}p</p>
-              <p className="text-3xl font-black text-gray-900">{oneBookCost.toLocaleString()}원</p>
-            </div>
-            {isEnough ? <span className="bg-green-100 text-green-700 px-3 py-1 rounded-full text-sm font-bold border border-green-200">제작 가능!</span> : <span className="bg-red-100 text-red-600 px-3 py-1 rounded-full text-sm font-bold border border-red-200 animate-pulse">사진 부족</span>}
-          </div>
-          <button onClick={() => { setIsProcessing(true); setTimeout(() => { setIsProcessing(false); setStep('PREVIEW'); }, 2000); }} disabled={!isEnough} className={STYLES.primaryBtn}>
-            책 만들기 (편집) <ChevronRight size={32} />
-          </button>
-        </div>
-        {isProcessing && <div className="absolute inset-0 bg-black bg-opacity-80 flex flex-col items-center justify-center z-50 text-white backdrop-blur-sm"><div className="w-20 h-20 border-4 border-yellow-400 border-t-transparent rounded-full animate-spin mb-6"></div><h3 className="text-3xl font-bold mb-3 text-yellow-400">주문 전송 중!</h3><p className="text-xl text-center leading-relaxed text-gray-200">미니가 예쁜 책을<br/>만들고 있어요 뚝딱뚝딱!</p></div>}
-      </div>
-    );
-  }
-
-  // 4. 미리보기
-  if (step === 'PREVIEW') {
-    return (
-      <div className={STYLES.container}>
-        <div className={STYLES.header}>
-          <button onClick={() => setStep('INSIDE')} className="mr-4"><ArrowLeft size={32}/></button>
-          <span className="text-xl font-bold">3단계: 확인하기</span>
-        </div>
-        <div className="p-6 flex-1 overflow-y-auto bg-gray-50">
-          {renderProgressBar(2)}
-          <h2 className={STYLES.title}>짠! 이렇게<br/>만들어질 거예요</h2>
-          <div className="mt-8 mb-8">
-            <h3 className="text-xl font-bold text-gray-800 mb-3 px-2 border-l-4 border-yellow-400">표지 디자인</h3>
-            <div className="aspect-[220/280] bg-white rounded-lg shadow-2xl overflow-hidden relative border border-gray-200 transform rotate-1 mx-auto w-3/4">
-               {renderCoverPreview(selectedCoverStyle, coverPhotos[0], displayTitle)}
-            </div>
-            <p className="text-center text-gray-400 text-xs mt-2">선택하신 '{COVER_STYLES.find(s=>s.id===selectedCoverStyle)?.name}' 스타일입니다.</p>
-          </div>
-          <div>
-            <h3 className="text-xl font-bold text-gray-800 mb-3 px-2 border-l-4 border-yellow-400">내지 맛보기</h3>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="aspect-[220/280] bg-white shadow-lg p-1 rounded flex flex-col gap-1">
-                <div className="flex-1 flex gap-1">
-                  <div className="flex-1 bg-gray-200 relative overflow-hidden">{insidePhotos[0] && <img src={insidePhotos[0]} className="w-full h-full object-cover"/>}</div>
-                  <div className="flex-1 bg-gray-200 relative overflow-hidden">{insidePhotos[1] && <img src={insidePhotos[1]} className="w-full h-full object-cover"/>}</div>
-                </div>
-                <div className="flex-1 bg-gray-200 relative overflow-hidden">{insidePhotos[2] && <img src={insidePhotos[2]} className="w-full h-full object-cover"/>}</div>
-              </div>
-              <div className="aspect-[220/280] bg-white shadow-lg p-1 rounded flex flex-col gap-1">
-                <div className="flex-1 bg-gray-200 relative overflow-hidden">{insidePhotos[3] && <img src={insidePhotos[3]} className="w-full h-full object-cover"/>}</div>
-                <div className="flex-1 bg-gray-200 relative overflow-hidden">{insidePhotos[4] && <img src={insidePhotos[4]} className="w-full h-full object-cover"/>}</div>
-              </div>
-            </div>
-            <p className="text-center text-gray-500 mt-4 text-sm font-medium leading-6">* 가로/세로 사진에 맞춰<br/>자동으로 예쁘게 배치했어요!</p>
-          </div>
-        </div>
-        <div className="p-6 bg-white border-t border-gray-100 shadow-[0_-10px_40px_rgba(0,0,0,0.1)] flex flex-col gap-3">
-          <button onClick={() => setStep('ADDRESS')} className={STYLES.primaryBtn}>좋아요, 주문할래요! <Check size={32} /></button>
-          <button onClick={() => setStep('INSIDE')} className={STYLES.secondaryBtn}><ArrowLeft size={24} /> 사진 다시 고르기</button>
-        </div>
-      </div>
-    );
-  }
-
-  // 5. 배송지 입력
-  if (step === 'ADDRESS') {
-    return (
-      <div className={STYLES.container}>
-        <div className={STYLES.header}>
-          <button onClick={() => setStep('PREVIEW')} className="mr-4"><ArrowLeft size={32}/></button>
-          <span className="text-xl font-bold">마지막 단계</span>
-        </div>
-        <div className="p-6 flex-1 overflow-y-auto">
-          {renderProgressBar(3)}
-          <div className="mb-10 bg-yellow-50 p-6 rounded-3xl border border-yellow-200 text-center">
-            <h2 className="text-2xl font-extrabold text-gray-900 mb-2">몇 권을<br/>만들어드릴까요?</h2>
-            <p className="text-gray-600 mb-6 text-sm">가족, 친구들과 추억을 나눠보세요!</p>
-            <div className="flex items-center justify-center gap-6">
-                <button onClick={() => handleQuantityChange(-1)} className="w-14 h-14 bg-white rounded-full shadow-sm border border-gray-200 flex items-center justify-center text-gray-600 hover:bg-gray-50 active:scale-95 transition disabled:opacity-50" disabled={quantity <= 1}><Minus size={24} strokeWidth={3} /></button>
-                <div className="w-20 text-center"><span className="text-5xl font-black text-gray-900">{quantity}</span><span className="text-lg font-bold text-gray-500 ml-1">권</span></div>
-                <button onClick={() => handleQuantityChange(1)} className="w-14 h-14 bg-white rounded-full shadow-sm border border-gray-200 flex items-center justify-center text-gray-800 hover:bg-gray-50 active:scale-95 transition"><Plus size={24} strokeWidth={3} /></button>
-            </div>
-            {quantity > 1 && <div className="mt-4 bg-white inline-block px-4 py-1 rounded-full text-sm text-yellow-700 font-bold border border-yellow-200 animate-pulse">🎁 {quantity}명에게 선물할 수 있어요!</div>}
-          </div>
-
-          <h2 className="text-2xl font-bold text-gray-900 mb-2">어디로<br/>보내드릴까요?</h2>
-          <div className="mt-6 space-y-6">
-            <div>
-              <label className="block text-xl font-bold text-gray-700 mb-2">받는 분 성함</label>
-              <input type="text" placeholder="예: 김태범" className={STYLES.input} value={address.name} onChange={(e) => setAddress({...address, name: e.target.value})} />
+      {/* 4. 확인하기 */}
+      {step === 'PREVIEW' && (
+        <>
+          <div className={STYLES.header}><button onClick={() => setStep('INSIDE')} className="mr-4"><ArrowLeft size={32}/></button><span className="text-xl font-bold">3단계: 확인하기</span></div>
+          <div className="p-6 flex-1 overflow-y-auto bg-gray-50">
+            {renderProgressBar(2)}
+            <h2 className={STYLES.title}>짠! 이렇게<br/>만들어질 거예요</h2>
+            <div className="mt-8 mb-8">
+              <h3 className="text-xl font-bold text-gray-800 mb-3 px-2 border-l-4 border-yellow-400 font-jua">표지 디자인</h3>
+              <div className="aspect-[220/280] bg-white rounded-lg shadow-2xl overflow-hidden relative border border-gray-200 transform rotate-1 mx-auto w-3/4">{renderCoverPreview(selectedCoverStyle, coverPhotos[0], displayTitle)}</div>
+              <p className="text-center text-gray-400 text-xs mt-2 font-jua">선택하신 '{COVER_STYLES.find(s=>s.id===selectedCoverStyle)?.name}' 스타일입니다.</p>
             </div>
             <div>
-              <label className="block text-xl font-bold text-gray-700 mb-2">전화번호</label>
-              <input type="tel" placeholder="010-0000-0000" className={STYLES.input} value={address.phone} onChange={handlePhoneChange} maxLength={13} />
+              <h3 className="text-xl font-bold text-gray-800 mb-3 px-2 border-l-4 border-yellow-400 font-jua">내지 맛보기</h3>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="aspect-[220/280] bg-white shadow-lg p-1 rounded flex flex-col gap-1"><div className="flex-1 flex gap-1"><div className="flex-1 bg-gray-200 relative overflow-hidden">{insidePhotos[0] && <img src={insidePhotos[0]} className="w-full h-full object-cover"/>}</div><div className="flex-1 bg-gray-200 relative overflow-hidden">{insidePhotos[1] && <img src={insidePhotos[1]} className="w-full h-full object-cover"/>}</div></div><div className="flex-1 bg-gray-200 relative overflow-hidden">{insidePhotos[2] && <img src={insidePhotos[2]} className="w-full h-full object-cover"/>}</div></div>
+                <div className="aspect-[220/280] bg-white shadow-lg p-1 rounded flex flex-col gap-1"><div className="flex-1 bg-gray-200 relative overflow-hidden">{insidePhotos[3] && <img src={insidePhotos[3]} className="w-full h-full object-cover"/>}</div><div className="flex-1 bg-gray-200 relative overflow-hidden">{insidePhotos[4] && <img src={insidePhotos[4]} className="w-full h-full object-cover"/>}</div></div>
+              </div>
+              <p className="text-center text-gray-500 mt-4 text-sm font-medium leading-6 font-jua">* 가로/세로 사진에 맞춰<br/>자동으로 예쁘게 배치했어요!</p>
             </div>
-            <div>
-              <label className="block text-xl font-bold text-gray-700 mb-2">주소</label>
-              <button onClick={handlePostcode} className="w-full bg-gray-100 p-4 rounded-xl text-left text-lg flex items-center gap-3 text-gray-600 hover:bg-gray-200 mb-2 border-2 border-gray-200"><MapPin size={24} className="text-gray-500"/> {address.zip ? `(${address.zip}) 우편번호 변경` : '우편번호 찾기'}</button>{address.zip && <div className="mb-2 p-3 bg-gray-50 rounded-lg text-gray-700 border border-gray-200">{address.addr}</div>}<input id="detailAddr" type="text" placeholder="상세 주소를 입력해주세요" className={STYLES.input} /></div>
           </div>
-        </div>
-        <div className="p-6 bg-white border-t border-gray-100">
-          <div className="mb-4 text-gray-600 space-y-2 border-b border-dashed border-gray-300 pb-4">
-            <div className="flex justify-between text-lg"><span>제작비 ({totalPages}p)</span><span>{oneBookCost.toLocaleString()}원</span></div>
-            <div className="flex justify-between text-lg font-bold text-gray-800"><span>수량</span><span>x {quantity}권</span></div>
-            <div className="flex justify-between text-lg text-gray-500"><span>배송비 (고정)</span><span>+ {shippingCost.toLocaleString()}원</span></div>
+          <div className="p-6 bg-white border-t border-gray-100 shadow-[0_-10px_40px_rgba(0,0,0,0.1)] flex flex-col gap-3">
+            <button onClick={() => setStep('ADDRESS')} className={STYLES.primaryBtn}>좋아요, 주문할래요! <Check size={32} /></button>
+            <button onClick={() => setStep('INSIDE')} className={STYLES.secondaryBtn}><ArrowLeft size={24} /> 사진 다시 고르기</button>
           </div>
-          <div className="mb-6 flex justify-between items-center"><span className="text-xl font-bold text-gray-600">총 결제금액</span><span className="text-3xl font-black text-red-500">{totalCost.toLocaleString()}원</span></div>
-          <button onClick={handleOrderSubmit} disabled={!address.name || !address.phone || !address.addr} className={STYLES.primaryBtn}>카카오페이 결제하기 <Package size={32} /></button>
-        </div>
-        {isProcessing && <div className="absolute inset-0 bg-black bg-opacity-80 flex flex-col items-center justify-center z-50 text-white backdrop-blur-sm"><div className="w-20 h-20 border-4 border-yellow-400 border-t-transparent rounded-full animate-spin mb-6"></div><h3 className="text-3xl font-bold mb-3 text-yellow-400">주문 전송 중!</h3><p className="text-xl text-center leading-relaxed text-gray-200">사진이 많으면 시간이 좀 걸려요.<br/>잠시만 기다려주세요.</p></div>}
-      </div>
-    );
-  }
+        </>
+      )}
 
-  // 6. 완료 화면
-  if (step === 'DONE') {
-    return (
-      <div className={STYLES.container}>
+      {/* 5. 마지막 단계 */}
+      {step === 'ADDRESS' && (
+        <>
+          <div className={STYLES.header}><button onClick={() => setStep('PREVIEW')} className="mr-4"><ArrowLeft size={32}/></button><span className="text-xl font-bold">마지막 단계</span></div>
+          <div className="p-6 flex-1 overflow-y-auto">
+            {renderProgressBar(3)}
+            <div className="mb-10 bg-yellow-50 p-6 rounded-3xl border border-yellow-200 text-center">
+              <h2 className="text-2xl font-extrabold text-gray-900 mb-2">몇 권을<br/>만들어드릴까요?</h2>
+              <p className="text-gray-600 mb-6 text-sm font-jua">가족, 친구들과 추억을 나눠보세요!</p>
+              <div className="flex items-center justify-center gap-6">
+                  <button onClick={() => handleQuantityChange(-1)} className="w-14 h-14 bg-white rounded-full shadow-sm border border-gray-200 flex items-center justify-center text-gray-600 hover:bg-gray-50 active:scale-95 transition disabled:opacity-50" disabled={quantity <= 1}><Minus size={24} strokeWidth={3} /></button>
+                  <div className="w-20 text-center"><span className="text-5xl font-black text-gray-900">{quantity}</span><span className="text-lg font-bold text-gray-500 ml-1 font-jua">권</span></div>
+                  <button onClick={() => handleQuantityChange(1)} className="w-14 h-14 bg-white rounded-full shadow-sm border border-gray-200 flex items-center justify-center text-gray-800 hover:bg-gray-50 active:scale-95 transition"><Plus size={24} strokeWidth={3} /></button>
+              </div>
+              {quantity > 1 && <div className="mt-4 bg-white inline-block px-4 py-1 rounded-full text-sm text-yellow-700 font-bold border border-yellow-200 animate-pulse font-jua">🎁 {quantity}명에게 선물할 수 있어요!</div>}
+            </div>
+            <h2 className="text-2xl font-bold text-gray-900 mb-2">어디로<br/>보내드릴까요?</h2>
+            <div className="mt-6 space-y-6">
+              <div><label className="block text-xl font-bold text-gray-700 mb-2">받는 분 성함</label><input type="text" placeholder="예: 김태범" className={STYLES.input} value={address.name} onChange={(e) => setAddress({...address, name: e.target.value})} /></div>
+              <div><label className="block text-xl font-bold text-gray-700 mb-2">전화번호</label><input type="tel" placeholder="010-0000-0000" className={STYLES.input} value={address.phone} onChange={handlePhoneChange} maxLength={13} /></div>
+              <div><label className="block text-xl font-bold text-gray-700 mb-2">주소</label><button onClick={handlePostcode} className="w-full bg-gray-100 p-4 rounded-xl text-left text-lg flex items-center gap-3 text-gray-600 hover:bg-gray-200 mb-2 border-2 border-gray-200"><MapPin size={24} className="text-gray-500"/> {address.zip ? `(${address.zip}) 우편번호 변경` : '우편번호 찾기'}</button>{address.zip && <div className="mb-2 p-3 bg-gray-50 rounded-lg text-gray-700 border border-gray-200 font-jua">{address.addr}</div>}<input id="detailAddr" type="text" placeholder="상세 주소를 입력해주세요" className={STYLES.input} /></div>
+            </div>
+          </div>
+          <div className="p-6 bg-white border-t border-gray-100">
+            <div className="mb-4 text-gray-600 space-y-2 border-b border-dashed border-gray-300 pb-4">
+              <div className="flex justify-between text-lg"><span>제작비 ({totalPages}p)</span><span>{oneBookCost.toLocaleString()}원</span></div>
+              <div className="flex justify-between text-lg font-bold text-gray-800 font-jua"><span>수량</span><span>x {quantity}권</span></div>
+              <div className="flex justify-between text-lg text-gray-500"><span>배송비 (고정)</span><span>+ {shippingCost.toLocaleString()}원</span></div>
+            </div>
+            <div className="mb-6 flex justify-between items-center"><span className="text-xl font-bold text-gray-600 font-jua">총 결제금액</span><span className="text-3xl font-black text-red-500 font-jua">{totalCost.toLocaleString()}원</span></div>
+            <button onClick={handleOrderSubmit} disabled={!address.name || address.phone.length < 12} className={STYLES.primaryBtn}>결제하고 주문하기 <Package size={32} /></button>
+          </div>
+          {isProcessing && <div className="absolute inset-0 bg-black bg-opacity-80 flex flex-col items-center justify-center z-50 text-white backdrop-blur-sm font-jua"><div className="w-20 h-20 border-4 border-yellow-400 border-t-transparent rounded-full animate-spin mb-6"></div><h3 className="text-3xl font-bold mb-3 text-yellow-400">주문 전송 중!</h3><p className="text-xl text-center leading-relaxed text-gray-200">사진이 많으면 시간이 좀 걸려요.<br/>잠시만 기다려주세요.</p></div>}
+        </>
+      )}
+
+      {/* 6. 완료 화면 */}
+      {step === 'DONE' && (
         <div className="flex-1 flex flex-col justify-center items-center p-8 text-center bg-yellow-50">
           <div className="w-28 h-28 bg-green-500 rounded-full flex items-center justify-center shadow-lg mb-8 animate-bounce"><Check size={64} color="white" strokeWidth={4} /></div>
-          <h1 className="text-4xl font-black text-gray-800 mb-4">주문 완료!</h1>
-          <p className="text-xl text-gray-600 leading-relaxed">대장님, 신청해주셔서 감사해요.<br/>예쁘게 만들어서 보내드릴게요!</p>
-          <div className="mt-12 w-full p-6 bg-white rounded-2xl shadow-sm text-left border border-gray-100">
+          <h1 className="text-4xl font-black text-gray-800 mb-4 font-jua">주문 완료!</h1>
+          <p className="text-xl text-gray-600 leading-relaxed font-jua">대장님, 신청해주셔서 감사해요.<br/>예쁘게 만들어서 보내드릴게요!</p>
+          <div className="mt-12 w-full p-6 bg-white rounded-2xl shadow-sm text-left border border-gray-100 font-jua">
             <h3 className="font-bold text-gray-500 mb-2">배송 정보</h3>
-            <p className="text-2xl font-bold text-gray-800">{address.name} 님</p>
+            <p className="text-2xl font-bold text-gray-800 font-jua">{address.name} 님</p>
             <p className="text-lg text-gray-600 mt-1">{address.phone}</p>
-            <p className="text-lg text-gray-600 mt-1">{address.addr}</p>
-            <div className="mt-4 pt-4 border-t border-gray-200 flex justify-between items-center"><span className="text-gray-500 font-bold">주문 수량</span><span className="text-xl font-black text-indigo-600">{quantity}권</span></div>
+            <p className="text-lg text-gray-600 mt-1 font-jua">{address.addr}</p>
+            <div className="mt-4 pt-4 border-t border-gray-200 flex justify-between items-center"><span className="text-gray-500 font-bold font-jua">주문 수량</span><span className="text-xl font-black text-indigo-600">{quantity}권</span></div>
           </div>
-          <div className="mt-auto w-full pt-8">
-            <button onClick={() => { setStep('HOME'); setCoverPhotos([]); setInsidePhotos([]); setCoverTitle(''); setAddress({name:'', phone:'', addr:''}); setQuantity(1); }} className="w-full bg-white border-2 border-gray-200 text-gray-600 text-xl font-bold py-6 rounded-2xl hover:bg-gray-50"><div className="flex items-center justify-center gap-2"><Home /> 처음으로 돌아가기</div></button>
+          <div className="mt-auto w-full pt-8 space-y-4">
+            <button onClick={() => window.location.href='/admin'} className="w-full bg-blue-600 text-white py-4 rounded-xl font-bold font-jua">주문 내역 확인하기 (관리자)</button>
+            <button onClick={() => window.location.reload()} className="w-full bg-white border-2 border-gray-200 text-gray-600 text-xl font-bold py-6 rounded-2xl hover:bg-gray-50 transition active:scale-95 font-jua"><div className="flex items-center justify-center gap-2 font-jua"><Home /> 처음으로 돌아가기</div></button>
           </div>
         </div>
-      </div>
-    );
-  }
-
-  return null;
+      )}
+    </div>
+  );
 }
 
 export default App;
